@@ -1,0 +1,10 @@
+# Copy this file to terraform.tfvars and fill in your actual values
+# IMPORTANT: Never commit terraform.tfvars to version control
+
+aws_region     = "us-east-2"
+environment    = "dev"
+
+# SmashRun OAuth credentials
+# Get these from: https://smashrun.com/settings/api
+smashrun_client_id     = "your-smashrun-client-id"
+smashrun_client_secret = "your-smashrun-client-secret"
