@@ -29,10 +29,16 @@ class Activity(BaseModel):
         description="Total distance in kilometers",
         gt=0,
     )
-    duration: int = Field(
-        description="Total duration in seconds, excluding pauses",
+    duration: float = Field(
+        description="Total duration in seconds (can have decimals), excluding pauses",
         gt=0,
     )
+
+    @field_validator("activity_id", mode="before")
+    @classmethod
+    def coerce_activity_id(cls, v: int | str) -> str:
+        """Convert activity_id from int to string if needed."""
+        return str(v)
 
     # Metadata
     activity_type: ActivityType = Field(
@@ -112,9 +118,9 @@ class Activity(BaseModel):
         default=None,
         description="Type of running surface",
     )
-    temperature: int | None = Field(
+    temperature: float | None = Field(
         default=None,
-        description="Average temperature in Celsius",
+        description="Average temperature in Celsius (can have decimals)",
         alias="temperature",
     )
     weather_type: WeatherType | None = Field(

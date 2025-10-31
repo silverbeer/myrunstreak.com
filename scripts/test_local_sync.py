@@ -11,7 +11,7 @@ Usage:
 
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from src.shared.config import get_settings
@@ -63,7 +63,7 @@ def run_oauth_flow(oauth_client: SmashRunOAuthClient) -> dict:
 
     # Add expiration timestamp
     token_data["expires_at"] = (
-        datetime.utcnow() + timedelta(seconds=token_data["expires_in"])
+        datetime.now(timezone.utc) + timedelta(seconds=token_data["expires_in"])
     ).isoformat()
 
     print("✓ Successfully obtained tokens")
@@ -100,14 +100,17 @@ def get_valid_access_token(oauth_client: SmashRunOAuthClient) -> str:
 
     # Check if token needs refresh
     expires_at = datetime.fromisoformat(token_data["expires_at"])
-    now = datetime.utcnow()
+    # Make expires_at timezone-aware if it isn't
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
 
     if now + timedelta(days=1) >= expires_at:
         logger.info("Token expired or expiring soon, refreshing...")
 
         new_tokens = oauth_client.refresh_access_token(token_data["refresh_token"])
         new_tokens["expires_at"] = (
-            datetime.utcnow() + timedelta(seconds=new_tokens["expires_in"])
+            datetime.now(timezone.utc) + timedelta(seconds=new_tokens["expires_in"])
         ).isoformat()
 
         save_tokens(new_tokens)
@@ -137,7 +140,7 @@ def update_sync_state(sync_date: date, runs_synced: int):
     """Update sync state in local file."""
     state = {
         "last_sync_date": sync_date.isoformat(),
-        "last_sync_timestamp": datetime.utcnow().isoformat(),
+        "last_sync_timestamp": datetime.now(timezone.utc).isoformat(),
         "runs_synced": runs_synced,
     }
 

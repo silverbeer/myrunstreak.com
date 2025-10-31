@@ -10,6 +10,7 @@ from .enums import (
     WeatherType,
 )
 from .nested import HeartRateRecovery, Lap, Song
+from .split import Split
 from .units import (
     UnitSystem,
     format_distance,
@@ -21,6 +22,7 @@ from .units import (
 __all__ = [
     # Main models
     "Activity",
+    "Split",
     # Nested models
     "Lap",
     "Song",

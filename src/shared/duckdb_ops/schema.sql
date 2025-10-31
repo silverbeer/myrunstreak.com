@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS runs (
 
     -- Core Metrics
     distance_km DOUBLE NOT NULL CHECK (distance_km > 0),
-    duration_seconds INTEGER NOT NULL CHECK (duration_seconds > 0),
+    duration_seconds DOUBLE NOT NULL CHECK (duration_seconds > 0),
 
     -- Computed Performance Metrics (stored for fast queries)
     average_pace_min_per_km DOUBLE,  -- Computed: duration_minutes / distance_km
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS runs (
 
     -- Environmental Conditions
     terrain VARCHAR,  -- road, trail, track, treadmill, beach, snowpack
-    temperature_celsius INTEGER,
+    temperature_celsius DOUBLE,
     weather_type VARCHAR,  -- indoor, clear, cloudy, rain, storm, snow
     humidity_percent INTEGER CHECK (humidity_percent BETWEEN 0 AND 100),
     wind_speed_kph INTEGER,
@@ -86,8 +86,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_year_month
 
 -- External ID lookup for deduplication
 CREATE INDEX IF NOT EXISTS idx_runs_external_id
-    ON runs(external_id)
-    WHERE external_id IS NOT NULL;
+    ON runs(external_id);
 
 -- =============================================================================
 -- Recording Data Table (Time Series)
@@ -107,7 +106,7 @@ CREATE TABLE IF NOT EXISTS recording_data (
     -- Pause information
     pause_indexes INTEGER[],
 
-    FOREIGN KEY (activity_id) REFERENCES runs(activity_id) ON DELETE CASCADE
+    FOREIGN KEY (activity_id) REFERENCES runs(activity_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_recording_data_activity_id
@@ -127,11 +126,49 @@ CREATE TABLE IF NOT EXISTS laps (
     end_time_seconds DOUBLE,    -- For duration-based laps
     end_distance_meters DOUBLE, -- For distance-based laps
 
-    FOREIGN KEY (activity_id) REFERENCES runs(activity_id) ON DELETE CASCADE
+    FOREIGN KEY (activity_id) REFERENCES runs(activity_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_laps_activity_id
     ON laps(activity_id);
+
+-- =============================================================================
+-- Splits Table
+-- =============================================================================
+-- Stores per-mile or per-kilometer splits for each run
+-- Captures pace, heart rate, and elevation changes per split
+
+CREATE SEQUENCE IF NOT EXISTS splits_id_seq START 1;
+
+CREATE TABLE IF NOT EXISTS splits (
+    id INTEGER PRIMARY KEY DEFAULT nextval('splits_id_seq'),
+    activity_id VARCHAR NOT NULL,
+
+    -- Split identification
+    split_number INTEGER NOT NULL,  -- 1, 2, 3, etc.
+    split_unit VARCHAR NOT NULL,    -- 'mi' or 'km'
+
+    -- Cumulative metrics (as returned by SmashRun API)
+    cumulative_distance DOUBLE NOT NULL,      -- Distance at end of this split
+    cumulative_seconds DOUBLE NOT NULL,       -- Time elapsed at end of this split
+
+    -- Performance metrics at this split
+    speed_kph DOUBLE,                         -- Speed at this point (km/h)
+    heart_rate INTEGER,                       -- Heart rate at this point (bpm)
+
+    -- Elevation changes during this split
+    cumulative_elevation_gain_meters DOUBLE,  -- Total elevation gained so far
+    cumulative_elevation_loss_meters DOUBLE,  -- Total elevation lost so far
+
+    FOREIGN KEY (activity_id) REFERENCES runs(activity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_splits_activity_id
+    ON splits(activity_id);
+
+-- Unique constraint: one split per mile/km per activity
+CREATE UNIQUE INDEX IF NOT EXISTS idx_splits_unique
+    ON splits(activity_id, split_unit, split_number);
 
 -- =============================================================================
 -- Analytics Views
@@ -266,6 +303,103 @@ SELECT
     updated_at,
     synced_at
 FROM runs;
+
+-- =============================================================================
+-- Splits Analytics Views
+-- =============================================================================
+
+-- Splits with Per-Split Calculations (Metric)
+-- Calculates the incremental pace, time, and elevation for each individual split
+CREATE OR REPLACE VIEW splits_per_segment AS
+WITH split_calcs AS (
+    SELECT
+        activity_id,
+        split_number,
+        split_unit,
+        cumulative_distance,
+        cumulative_seconds,
+        speed_kph,
+        heart_rate,
+        cumulative_elevation_gain_meters,
+        cumulative_elevation_loss_meters,
+        -- Calculate previous split's values
+        LAG(cumulative_distance, 1, 0) OVER (PARTITION BY activity_id, split_unit ORDER BY split_number) as prev_distance,
+        LAG(cumulative_seconds, 1, 0) OVER (PARTITION BY activity_id, split_unit ORDER BY split_number) as prev_seconds,
+        LAG(cumulative_elevation_gain_meters, 1, 0) OVER (PARTITION BY activity_id, split_unit ORDER BY split_number) as prev_elev_gain,
+        LAG(cumulative_elevation_loss_meters, 1, 0) OVER (PARTITION BY activity_id, split_unit ORDER BY split_number) as prev_elev_loss
+    FROM splits
+)
+SELECT
+    activity_id,
+    split_number,
+    split_unit,
+    -- Incremental metrics for THIS split only
+    cumulative_distance - prev_distance as split_distance,
+    cumulative_seconds - prev_seconds as split_seconds,
+    cumulative_elevation_gain_meters - prev_elev_gain as split_elevation_gain_meters,
+    cumulative_elevation_loss_meters - prev_elev_loss as split_elevation_loss_meters,
+    -- Pace calculation (minutes per unit distance)
+    CASE
+        WHEN (cumulative_distance - prev_distance) > 0
+        THEN ((cumulative_seconds - prev_seconds) / 60.0) / (cumulative_distance - prev_distance)
+        ELSE NULL
+    END as split_pace_min_per_unit,
+    -- Cumulative metrics
+    cumulative_distance,
+    cumulative_seconds,
+    speed_kph,
+    heart_rate,
+    cumulative_elevation_gain_meters,
+    cumulative_elevation_loss_meters
+FROM split_calcs;
+
+-- Splits in Miles (Imperial Units)
+-- Note: Since we filter WHERE split_unit = 'mi', the data is already in miles from the API
+CREATE OR REPLACE VIEW splits_miles AS
+SELECT
+    s.activity_id,
+    s.split_number,
+    r.start_date,
+    -- Split metrics (already in miles since split_unit = 'mi')
+    s.split_distance as split_distance_miles,
+    s.split_seconds,
+    s.split_pace_min_per_unit as split_pace_min_per_mile,
+    -- Pace formatted as MM:SS
+    CAST(FLOOR(s.split_pace_min_per_unit) AS INTEGER) as pace_minutes,
+    CAST(ROUND((s.split_pace_min_per_unit - FLOOR(s.split_pace_min_per_unit)) * 60) AS INTEGER) as pace_seconds,
+    -- Performance metrics
+    s.heart_rate,
+    s.speed_kph * 0.621371 as speed_mph,
+    -- Elevation in meters (standard for running)
+    s.split_elevation_gain_meters,
+    s.split_elevation_loss_meters,
+    -- Cumulative (already in miles)
+    s.cumulative_distance as cumulative_distance_miles,
+    s.cumulative_seconds
+FROM splits_per_segment s
+JOIN runs r ON s.activity_id = r.activity_id
+WHERE s.split_unit = 'mi'
+ORDER BY s.activity_id, s.split_number;
+
+-- Fastest Splits Analysis
+-- Find your fastest mile splits across all runs
+CREATE OR REPLACE VIEW fastest_mile_splits AS
+SELECT
+    s.activity_id,
+    r.start_date,
+    s.split_number,
+    s.split_distance_miles,
+    s.split_pace_min_per_mile,
+    s.pace_minutes,
+    s.pace_seconds,
+    s.heart_rate,
+    s.split_elevation_gain_meters,
+    r.distance_km * 0.621371 as run_total_miles,
+    r.average_pace_min_per_km / 0.621371 as run_avg_pace_min_per_mile
+FROM splits_miles s
+JOIN runs r ON s.activity_id = r.activity_id
+WHERE s.split_distance_miles >= 0.9  -- Only count splits that are at least 0.9 miles (near full mile)
+ORDER BY s.split_pace_min_per_mile ASC;
 
 -- =============================================================================
 -- Schema Metadata

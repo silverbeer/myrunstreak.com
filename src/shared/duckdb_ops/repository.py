@@ -6,7 +6,7 @@ from typing import Any
 
 import duckdb
 
-from ..models import Activity
+from ..models import Activity, Split
 
 logger = logging.getLogger(__name__)
 
@@ -304,3 +304,104 @@ class RunRepository:
         ).fetchone()
 
         return result[0] if result and result[0] else 0
+
+    def insert_splits(self, activity_id: str, splits: list[Split], unit: str = "mi") -> None:
+        """
+        Insert splits for a run.
+
+        Args:
+            activity_id: Activity ID these splits belong to
+            splits: List of Split models
+            unit: 'mi' for miles or 'km' for kilometers
+
+        Raises:
+            duckdb.ConstraintException: If splits already exist for this activity/unit
+        """
+        if not splits:
+            logger.info(f"No splits to insert for activity {activity_id}")
+            return
+
+        logger.info(f"Inserting {len(splits)} {unit} splits for activity {activity_id}")
+
+        for i, split in enumerate(splits, start=1):
+            self.connection.execute(
+                """
+                INSERT INTO splits (
+                    activity_id, split_number, split_unit,
+                    cumulative_distance, cumulative_seconds,
+                    speed_kph, heart_rate,
+                    cumulative_elevation_gain_meters, cumulative_elevation_loss_meters
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    activity_id,
+                    i,  # split_number
+                    unit,
+                    split.cumulative_distance,
+                    split.cumulative_seconds,
+                    split.speed_kph,
+                    split.heart_rate,
+                    split.cumulative_elevation_gain_meters,
+                    split.cumulative_elevation_loss_meters,
+                ],
+            )
+
+        logger.info(f"Successfully inserted {len(splits)} splits for activity {activity_id}")
+
+    def delete_splits(self, activity_id: str, unit: str | None = None) -> None:
+        """
+        Delete splits for a run.
+
+        Args:
+            activity_id: Activity ID to delete splits for
+            unit: Optional unit filter ('mi' or 'km'). If None, deletes all splits.
+        """
+        if unit:
+            logger.info(f"Deleting {unit} splits for activity {activity_id}")
+            self.connection.execute(
+                "DELETE FROM splits WHERE activity_id = ? AND split_unit = ?",
+                [activity_id, unit],
+            )
+        else:
+            logger.info(f"Deleting all splits for activity {activity_id}")
+            self.connection.execute(
+                "DELETE FROM splits WHERE activity_id = ?",
+                [activity_id],
+            )
+
+    def upsert_splits(self, activity_id: str, splits: list[Split], unit: str = "mi") -> None:
+        """
+        Insert or replace splits for a run.
+
+        Args:
+            activity_id: Activity ID these splits belong to
+            splits: List of Split models
+            unit: 'mi' for miles or 'km' for kilometers
+        """
+        logger.info(f"Upserting {len(splits)} {unit} splits for activity {activity_id}")
+
+        # Delete existing splits for this activity/unit
+        self.delete_splits(activity_id, unit)
+
+        # Insert new splits
+        self.insert_splits(activity_id, splits, unit)
+
+        logger.info(f"Successfully upserted splits for activity {activity_id}")
+
+    def has_splits(self, activity_id: str, unit: str = "mi") -> bool:
+        """
+        Check if splits exist for an activity.
+
+        Args:
+            activity_id: Activity ID to check
+            unit: 'mi' for miles or 'km' for kilometers
+
+        Returns:
+            True if splits exist, False otherwise
+        """
+        result = self.connection.execute(
+            "SELECT COUNT(*) FROM splits WHERE activity_id = ? AND split_unit = ?",
+            [activity_id, unit],
+        ).fetchone()
+
+        return result[0] > 0 if result else False
