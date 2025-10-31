@@ -132,6 +132,20 @@ User 2: terraform apply (at same time)
 
 Before running bootstrap:
 
+### 0. AWS Account Setup (If Brand New Account)
+
+**If you have a brand new AWS account with only a root user**, complete AWS setup first:
+
+📖 **[AWS_SETUP.md](./AWS_SETUP.md)** - Complete guide to:
+- Create IAM user for daily operations (don't use root!)
+- Set up AWS CLI with access keys
+- Verify everything works
+
+**Skip this if you already have**:
+- ✅ IAM user created
+- ✅ AWS CLI installed and configured
+- ✅ Can run `aws sts get-caller-identity` successfully
+
 ### 1. AWS CLI Configured
 
 ```bash
@@ -145,6 +159,8 @@ aws sts get-caller-identity
 #     "Arn": "arn:aws:iam::123456789012:user/your-name"
 # }
 ```
+
+**If this fails**: See [AWS_SETUP.md](./AWS_SETUP.md) for complete setup instructions.
 
 ### 2. AWS Credentials with Required Permissions
 
