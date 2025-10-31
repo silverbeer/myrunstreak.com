@@ -1,0 +1,387 @@
+# ==============================================================================
+# GitHub Actions Workflow - Lambda Function Deployment
+# ==============================================================================
+# This workflow packages and deploys Lambda function code.
+# Separate from Terraform because code changes happen more frequently than
+# infrastructure changes.
+#
+# Triggers:
+# - Push to main branch (when PR is merged)
+# - Only if Lambda code or dependencies changed
+# - Manual workflow dispatch
+#
+# What it does:
+# 1. Check out code
+# 2. Set up Python and UV
+# 3. Install dependencies
+# 4. Package Lambda function (code + dependencies)
+# 5. Create deployment ZIP
+# 6. Update Lambda function code
+# 7. Run smoke tests
+#
+# Why separate from Terraform?
+# - Code changes are frequent
+# - Infrastructure changes are rare
+# - Faster deployment (no Terraform plan/apply)
+# - Can roll back code without touching infrastructure
+#
+# Learning Points:
+# - Lambda packaging with dependencies
+# - UV for Python package management
+# - AWS Lambda update-function-code API
+# - Deployment verification
+# ==============================================================================
+
+name: "Deploy Lambda Function"
+
+on:
+  # Run when Lambda code is pushed to main
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/lambda-deploy.yml"
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+# Required for OIDC authentication with AWS
+permissions:
+  id-token: write
+  contents: read
+
+# Environment variables
+env:
+  AWS_REGION: us-east-2
+  PYTHON_VERSION: "3.12"
+  LAMBDA_FUNCTION_NAME: myrunstreak-sync-runner-dev
+
+jobs:
+  deploy-lambda:
+    name: "Package and Deploy Lambda"
+    runs-on: ubuntu-latest
+
+    steps:
+      # ========================================================================
+      # Step 1: Check out code
+      # ========================================================================
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ========================================================================
+      # Step 2: Set up Python
+      # ========================================================================
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # ========================================================================
+      # Step 3: Install UV
+      # ========================================================================
+      # UV is our exclusive Python package manager (faster than pip)
+
+      - name: Install UV
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Verify UV Installation
+        run: uv --version
+
+      # ========================================================================
+      # Step 4: Create Lambda Package Directory
+      # ========================================================================
+      # Lambda needs code + dependencies in a flat structure
+
+      - name: Create Package Directory
+        run: mkdir -p lambda-package
+
+      # ========================================================================
+      # Step 5: Install Dependencies
+      # ========================================================================
+      # Install production dependencies (not dev dependencies)
+
+      - name: Install Dependencies
+        run: |
+          # Install dependencies to lambda-package directory
+          uv pip install --target lambda-package --no-deps -r <(uv pip freeze)
+
+          # Why --no-deps?
+          # We're installing from uv pip freeze which already has resolved versions
+          # --no-deps prevents re-resolving and speeds up installation
+
+          # Alternative simpler approach:
+          # uv pip install --target lambda-package .
+
+      # ========================================================================
+      # Step 6: Copy Application Code
+      # ========================================================================
+      # Copy src/ directory to package
+
+      - name: Copy Application Code
+        run: |
+          cp -r src lambda-package/
+          # Lambda handler should be at root: lambda_function.py
+
+      # ========================================================================
+      # Step 7: Create Lambda Handler
+      # ========================================================================
+      # Create lambda_function.py that imports from src/
+
+      - name: Create Lambda Handler
+        run: |
+          cat > lambda-package/lambda_function.py <<'EOF'
+          """
+          AWS Lambda handler for MyRunStreak.com sync function.
+
+          This handler is invoked by:
+          - EventBridge (daily scheduled sync)
+          - API Gateway (manual sync trigger)
+          """
+          import json
+          import logging
+          import os
+          from datetime import datetime
+
+          # Configure logging
+          logging.basicConfig(
+              level=os.environ.get('LOG_LEVEL', 'INFO'),
+              format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+          )
+          logger = logging.getLogger(__name__)
+
+
+          def handler(event, context):
+              """
+              Lambda function handler.
+
+              Args:
+                  event: Event data (from EventBridge or API Gateway)
+                  context: Lambda context object
+
+              Returns:
+                  Response dict for API Gateway or success status
+              """
+              logger.info(f"Lambda invoked: {json.dumps(event)}")
+
+              # Determine invocation source
+              source = event.get('source', 'api-gateway')
+
+              try:
+                  # Import sync logic
+                  # TODO: Implement actual sync logic
+                  # from src.lambda_sync import run_sync
+                  # result = run_sync()
+
+                  # Placeholder response
+                  result = {
+                      'status': 'success',
+                      'message': 'Lambda function deployed successfully!',
+                      'source': source,
+                      'timestamp': datetime.utcnow().isoformat(),
+                      'function_name': context.function_name,
+                      'function_version': context.function_version,
+                  }
+
+                  logger.info(f"Sync completed: {result}")
+
+                  # Return response for API Gateway
+                  if source == 'api-gateway' or 'httpMethod' in event:
+                      return {
+                          'statusCode': 200,
+                          'headers': {
+                              'Content-Type': 'application/json',
+                              'Access-Control-Allow-Origin': '*'
+                          },
+                          'body': json.dumps(result)
+                      }
+
+                  # Return simple dict for EventBridge
+                  return result
+
+              except Exception as e:
+                  logger.error(f"Sync failed: {str(e)}", exc_info=True)
+
+                  error_response = {
+                      'status': 'error',
+                      'message': str(e),
+                      'timestamp': datetime.utcnow().isoformat()
+                  }
+
+                  if source == 'api-gateway' or 'httpMethod' in event:
+                      return {
+                          'statusCode': 500,
+                          'headers': {'Content-Type': 'application/json'},
+                          'body': json.dumps(error_response)
+                      }
+
+                  raise
+          EOF
+
+      # ========================================================================
+      # Step 8: Remove Unnecessary Files
+      # ========================================================================
+      # Reduce package size by removing unneeded files
+
+      - name: Clean Up Package
+        run: |
+          cd lambda-package
+
+          # Remove __pycache__ directories
+          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+          # Remove .pyc files
+          find . -type f -name "*.pyc" -delete
+
+          # Remove tests if any
+          rm -rf tests/ test_*.py
+
+          # Remove .dist-info directories (metadata, not needed at runtime)
+          find . -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+
+      # ========================================================================
+      # Step 9: Create Deployment ZIP
+      # ========================================================================
+      - name: Create Deployment Package
+        run: |
+          cd lambda-package
+          zip -r ../deployment-package.zip . -q
+          cd ..
+
+          # Show package size
+          ls -lh deployment-package.zip
+
+          # Warn if package is too large (Lambda limit is 50MB direct upload, 250MB unzipped)
+          SIZE=$(stat -f%z deployment-package.zip 2>/dev/null || stat -c%s deployment-package.zip)
+          if [ $SIZE -gt 52428800 ]; then
+            echo "⚠️ Package size exceeds 50MB. Consider using Lambda layers or S3."
+          fi
+
+      # ========================================================================
+      # Step 10: Configure AWS Credentials
+      # ========================================================================
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ========================================================================
+      # Step 11: Deploy to Lambda
+      # ========================================================================
+      - name: Deploy to AWS Lambda
+        id: deploy
+        run: |
+          # Update Lambda function code
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://deployment-package.zip \
+            --publish
+
+          # Wait for update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+
+          echo "✅ Lambda function updated successfully"
+
+      # ========================================================================
+      # Step 12: Get Function Info
+      # ========================================================================
+      - name: Get Function Info
+        id: function-info
+        run: |
+          # Get function configuration
+          CONFIG=$(aws lambda get-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }})
+
+          # Extract version and size
+          VERSION=$(echo $CONFIG | jq -r '.Version')
+          SIZE=$(echo $CONFIG | jq -r '.CodeSize')
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+
+      # ========================================================================
+      # Step 13: Run Smoke Test
+      # ========================================================================
+      # Invoke Lambda to verify it works
+
+      - name: Smoke Test
+        id: test
+        run: |
+          # Invoke Lambda with test event
+          RESULT=$(aws lambda invoke \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --payload '{"source":"github-actions","action":"smoke-test"}' \
+            --cli-binary-format raw-in-base64-out \
+            response.json)
+
+          # Check for errors
+          if echo $RESULT | jq -e '.FunctionError' > /dev/null; then
+            echo "❌ Lambda invocation failed"
+            cat response.json
+            exit 1
+          fi
+
+          echo "✅ Smoke test passed"
+          cat response.json
+
+      # ========================================================================
+      # Step 14: Upload Deployment Artifact
+      # ========================================================================
+      # Save ZIP file as GitHub artifact for debugging/rollback
+
+      - name: Upload Deployment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-deployment-package
+          path: deployment-package.zip
+          retention-days: 30
+
+      # ========================================================================
+      # Step 15: Create Deployment Summary
+      # ========================================================================
+      - name: Create Deployment Summary
+        if: steps.deploy.outcome == 'success'
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Lambda Function Deployed
+
+          **Function:** \`${{ env.LAMBDA_FUNCTION_NAME }}\`
+          **Version:** \`${{ steps.function-info.outputs.version }}\`
+          **Package Size:** $((${{ steps.function-info.outputs.size }} / 1024)) KB
+          **Deployed At:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          **Deployed By:** @${{ github.actor }}
+
+          ---
+
+          ### ✅ Smoke Test Results
+
+          Lambda function invoked successfully and returned expected response.
+
+          ---
+
+          ### 📊 AWS Console Links
+
+          - [Lambda Function](https://console.aws.amazon.com/lambda/home?region=${{ env.AWS_REGION }}#/functions/${{ env.LAMBDA_FUNCTION_NAME }})
+          - [CloudWatch Logs](https://console.aws.amazon.com/cloudwatch/home?region=${{ env.AWS_REGION }}#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252F${{ env.LAMBDA_FUNCTION_NAME }})
+
+          ---
+
+          ### 🧪 Test the Deployment
+
+          \`\`\`bash
+          # Via AWS CLI
+          aws lambda invoke --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \\
+            --payload '{"action":"test"}' response.json
+
+          # Via API Gateway (get API key from Terraform outputs)
+          curl -X POST https://YOUR_API_ID.execute-api.${{ env.AWS_REGION }}.amazonaws.com/dev/sync \\
+            -H "x-api-key: YOUR_API_KEY"
+          \`\`\`
+
+          EOF
