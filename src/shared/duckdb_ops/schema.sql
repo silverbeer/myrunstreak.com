@@ -189,6 +189,85 @@ GROUP BY streak_group
 ORDER BY streak_length_days DESC;
 
 -- =============================================================================
+-- Imperial Unit Views (Miles, MPH)
+-- =============================================================================
+-- These views automatically convert all distances to miles for US users
+-- The underlying data is stored in kilometers for consistency
+
+-- Daily Summary (Miles)
+CREATE OR REPLACE VIEW daily_summary_miles AS
+SELECT
+    start_date,
+    COUNT(*) as run_count,
+    SUM(distance_km * 0.621371) as total_distance_miles,
+    SUM(duration_seconds) as total_duration_seconds,
+    AVG(average_pace_min_per_km / 0.621371) as avg_pace_min_per_mile,
+    AVG(average_speed_kph * 0.621371) as avg_speed_mph,
+    AVG(heart_rate_average) as avg_heart_rate,
+    MIN(start_date_time_local) as first_run_time,
+    MAX(start_date_time_local) as last_run_time
+FROM runs
+GROUP BY start_date
+ORDER BY start_date DESC;
+
+-- Monthly Summary (Miles)
+CREATE OR REPLACE VIEW monthly_summary_miles AS
+SELECT
+    start_year,
+    start_month,
+    COUNT(*) as run_count,
+    SUM(distance_km * 0.621371) as total_distance_miles,
+    SUM(duration_seconds) as total_duration_seconds,
+    AVG(average_pace_min_per_km / 0.621371) as avg_pace_min_per_mile,
+    AVG(average_speed_kph * 0.621371) as avg_speed_mph,
+    AVG(distance_km * 0.621371) as avg_distance_miles,
+    MAX(distance_km * 0.621371) as longest_run_miles
+FROM runs
+GROUP BY start_year, start_month
+ORDER BY start_year DESC, start_month DESC;
+
+-- Runs View (Miles) - All runs with imperial units
+CREATE OR REPLACE VIEW runs_miles AS
+SELECT
+    activity_id,
+    external_id,
+    start_date_time_local,
+    start_date,
+    start_year,
+    start_month,
+    start_day_of_week,
+    distance_km * 0.621371 as distance_miles,
+    duration_seconds,
+    average_pace_min_per_km / 0.621371 as average_pace_min_per_mile,
+    average_speed_kph * 0.621371 as average_speed_mph,
+    cadence_average,
+    cadence_min,
+    cadence_max,
+    heart_rate_average,
+    heart_rate_min,
+    heart_rate_max,
+    body_weight_kg * 2.20462 as body_weight_lbs,
+    how_felt,
+    terrain,
+    temperature_celsius,
+    (temperature_celsius * 9.0 / 5.0) + 32 as temperature_fahrenheit,
+    weather_type,
+    humidity_percent,
+    wind_speed_kph * 0.621371 as wind_speed_mph,
+    notes,
+    activity_type,
+    device_type,
+    app_version,
+    has_gps_data,
+    has_heart_rate_data,
+    has_cadence_data,
+    has_laps,
+    created_at,
+    updated_at,
+    synced_at
+FROM runs;
+
+-- =============================================================================
 -- Schema Metadata
 -- =============================================================================
 

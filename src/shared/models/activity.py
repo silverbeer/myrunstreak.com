@@ -206,3 +206,25 @@ class Activity(BaseModel):
         if self.duration > 0:
             return (self.distance / self.duration) * 3600
         return 0.0
+
+    # Imperial unit properties (miles-based)
+    @property
+    def distance_miles(self) -> float:
+        """Get distance in miles."""
+        from .units import km_to_miles
+
+        return km_to_miles(self.distance)
+
+    @property
+    def average_pace_min_per_mile(self) -> float:
+        """Calculate average pace in minutes per mile."""
+        if self.distance_miles > 0 and self.duration > 0:
+            return (self.duration / 60) / self.distance_miles
+        return 0.0
+
+    @property
+    def average_speed_mph(self) -> float:
+        """Calculate average speed in miles per hour."""
+        if self.duration > 0:
+            return (self.distance_miles / self.duration) * 3600
+        return 0.0
