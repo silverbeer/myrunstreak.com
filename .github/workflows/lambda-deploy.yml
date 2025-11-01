@@ -57,12 +57,24 @@ permissions:
 env:
   AWS_REGION: us-east-2
   PYTHON_VERSION: "3.12"
-  LAMBDA_FUNCTION_NAME: myrunstreak-sync-runner-dev
 
 jobs:
   deploy-lambda:
-    name: "Package and Deploy Lambda"
+    name: "Deploy ${{ matrix.lambda.name }}"
     runs-on: ubuntu-latest
+
+    # Deploy both sync and query Lambda functions
+    strategy:
+      matrix:
+        lambda:
+          - name: "Sync Lambda"
+            function_name: myrunstreak-sync-runner-dev
+            handler_module: sync_runs
+            handler_import: "from src.lambdas.sync_runs.handler import lambda_handler"
+          - name: "Query Lambda"
+            function_name: myrunstreak-query-runner-dev
+            handler_module: query_runs
+            handler_import: "from src.lambdas.query_runs.handler import lambda_handler"
 
     steps:
       # ========================================================================
@@ -130,11 +142,11 @@ jobs:
         run: |
           cat > lambda-package/lambda_function.py <<'EOF'
           """
-          AWS Lambda entry point for MyRunStreak.com sync function.
+          AWS Lambda entry point for MyRunStreak.com ${{ matrix.lambda.handler_module }} function.
 
-          This handler imports the real sync logic from src/lambdas/sync_runs/handler.py
+          This handler imports the real logic from src/lambdas/${{ matrix.lambda.handler_module }}/handler.py
           """
-          from src.lambdas.sync_runs.handler import lambda_handler
+          ${{ matrix.lambda.handler_import }}
 
           # Re-export the handler function for Lambda to invoke
           handler = lambda_handler
@@ -196,13 +208,13 @@ jobs:
         run: |
           # Update Lambda function code
           aws lambda update-function-code \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --function-name ${{ matrix.lambda.function_name }} \
             --zip-file fileb://deployment-package.zip \
             --publish
 
           # Wait for update to complete
           aws lambda wait function-updated \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+            --function-name ${{ matrix.lambda.function_name }}
 
           echo "✅ Lambda function updated successfully"
 
@@ -214,7 +226,7 @@ jobs:
         run: |
           # Get function configuration
           CONFIG=$(aws lambda get-function-configuration \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }})
+            --function-name ${{ matrix.lambda.function_name }})
 
           # Extract version and size
           VERSION=$(echo $CONFIG | jq -r '.Version')
@@ -233,7 +245,7 @@ jobs:
         run: |
           # Invoke Lambda with test event
           RESULT=$(aws lambda invoke \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --function-name ${{ matrix.lambda.function_name }} \
             --payload '{"source":"github-actions","action":"smoke-test"}' \
             --cli-binary-format raw-in-base64-out \
             response.json)
@@ -256,7 +268,7 @@ jobs:
       - name: Upload Deployment Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lambda-deployment-package
+          name: lambda-deployment-package-${{ matrix.lambda.handler_module }}
           path: deployment-package.zip
           retention-days: 30
 
@@ -267,9 +279,9 @@ jobs:
         if: steps.deploy.outcome == 'success'
         run: |
           cat >> $GITHUB_STEP_SUMMARY <<EOF
-          ## 🚀 Lambda Function Deployed
+          ## 🚀 ${{ matrix.lambda.name }} Deployed
 
-          **Function:** \`${{ env.LAMBDA_FUNCTION_NAME }}\`
+          **Function:** \`${{ matrix.lambda.function_name }}\`
           **Version:** \`${{ steps.function-info.outputs.version }}\`
           **Package Size:** $((${{ steps.function-info.outputs.size }} / 1024)) KB
           **Deployed At:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
@@ -285,8 +297,8 @@ jobs:
 
           ### 📊 AWS Console Links
 
-          - [Lambda Function](https://console.aws.amazon.com/lambda/home?region=${{ env.AWS_REGION }}#/functions/${{ env.LAMBDA_FUNCTION_NAME }})
-          - [CloudWatch Logs](https://console.aws.amazon.com/cloudwatch/home?region=${{ env.AWS_REGION }}#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252F${{ env.LAMBDA_FUNCTION_NAME }})
+          - [Lambda Function](https://console.aws.amazon.com/lambda/home?region=${{ env.AWS_REGION }}#/functions/${{ matrix.lambda.function_name }})
+          - [CloudWatch Logs](https://console.aws.amazon.com/cloudwatch/home?region=${{ env.AWS_REGION }}#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252F${{ matrix.lambda.function_name }})
 
           ---
 
@@ -294,12 +306,8 @@ jobs:
 
           \`\`\`bash
           # Via AWS CLI
-          aws lambda invoke --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \\
+          aws lambda invoke --function-name ${{ matrix.lambda.function_name }} \\
             --payload '{"action":"test"}' response.json
-
-          # Via API Gateway (get API key from Terraform outputs)
-          curl -X POST https://YOUR_API_ID.execute-api.${{ env.AWS_REGION }}.amazonaws.com/dev/sync \\
-            -H "x-api-key: YOUR_API_KEY"
           \`\`\`
 
           EOF
