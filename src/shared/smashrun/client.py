@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from ..models import Activity
+from ..models import Activity, Split
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,35 @@ class SmashRunAPIClient:
 
         return activity
 
+    def get_activity_splits(
+        self, activity_id: str, unit: str = "mi"
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch per-mile or per-kilometer splits for an activity.
+
+        Args:
+            activity_id: SmashRun activity ID
+            unit: Either 'mi' for miles or 'km' for kilometers
+
+        Returns:
+            List of split dictionaries with speed and heart rate data
+
+        Raises:
+            httpx.HTTPStatusError: If activity not found or request fails
+        """
+        if unit not in ("mi", "km"):
+            raise ValueError("unit must be 'mi' or 'km'")
+
+        logger.info(f"Fetching {unit} splits for activity {activity_id}")
+
+        response = self.client.get(f"/my/activities/{activity_id}/splits/{unit}")
+        response.raise_for_status()
+
+        splits = response.json()
+        logger.info(f"Retrieved {len(splits)} splits for activity {activity_id}")
+
+        return splits
+
     def get_all_activities_since(
         self, since: date, batch_size: int = 100
     ) -> list[dict[str, Any]]:
@@ -198,6 +227,21 @@ class SmashRunAPIClient:
             ValidationError: If activity data is invalid
         """
         return Activity(**activity_data)
+
+    def parse_splits(self, splits_data: list[dict[str, Any]]) -> list[Split]:
+        """
+        Parse SmashRun splits data into Split models.
+
+        Args:
+            splits_data: Raw splits list from SmashRun API
+
+        Returns:
+            List of validated Split models
+
+        Raises:
+            ValidationError: If splits data is invalid
+        """
+        return [Split(**split) for split in splits_data]
 
     def get_user_info(self) -> dict[str, Any]:
         """

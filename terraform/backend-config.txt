@@ -1,0 +1,7 @@
+backend "s3" {
+  bucket         = "myrunstreak-terraform-state-855323747881"
+  key            = "myrunstreak/terraform.tfstate"
+  region         = "us-east-2"
+  dynamodb_table = "myrunstreak-terraform-locks"
+  encrypt        = true
+}

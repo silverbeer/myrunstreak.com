@@ -17,6 +17,7 @@ class HowFelt(str, Enum):
     SO_SO = "soso"
     TIRED = "tired"
     INJURED = "injured"
+    NONE = "none"  # When runner doesn't specify
 
 
 class Terrain(str, Enum):
@@ -28,6 +29,7 @@ class Terrain(str, Enum):
     TREADMILL = "treadmill"
     BEACH = "beach"
     SNOWPACK = "snowpack"
+    NONE = "none"  # When runner doesn't specify
 
 
 class WeatherType(str, Enum):
@@ -36,7 +38,9 @@ class WeatherType(str, Enum):
     INDOOR = "indoor"
     CLEAR = "clear"
     CLOUDY = "cloudy"
+    PARTLY_CLOUDY = "partlycloudy"
     RAIN = "rain"
+    EXTREME_RAIN = "extremerain"
     STORM = "storm"
     SNOW = "snow"
 
