@@ -52,3 +52,13 @@ output "health_endpoint" {
   description = "Full URL for the health endpoint"
   value       = "${aws_api_gateway_stage.main.invoke_url}/health"
 }
+
+output "rest_api_id" {
+  description = "ID of the REST API (for creating additional resources)"
+  value       = aws_api_gateway_rest_api.main.id
+}
+
+output "root_resource_id" {
+  description = "Root resource ID of the REST API (for creating child resources)"
+  value       = aws_api_gateway_rest_api.main.root_resource_id
+}
