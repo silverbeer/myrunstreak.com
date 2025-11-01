@@ -97,7 +97,7 @@ resource "aws_lambda_function" "sync_runner" {
         # Core configuration
         ENVIRONMENT    = var.environment
         S3_BUCKET_NAME = var.s3_bucket_name
-        AWS_REGION     = var.aws_region
+        # Note: AWS_REGION is automatically provided by Lambda runtime (reserved variable)
 
         # Secrets Manager secret names (not the actual secrets!)
         SMASHRUN_SECRET_NAME = var.smashrun_secret_name

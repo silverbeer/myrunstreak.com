@@ -101,6 +101,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "database" {
     id     = "delete-old-versions"
     status = "Enabled"
 
+    filter {}  # Apply to all objects
+
     noncurrent_version_expiration {
       noncurrent_days = 30
     }
@@ -114,6 +116,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "database" {
   rule {
     id     = "cleanup-incomplete-uploads"
     status = "Enabled"
+
+    filter {}  # Apply to all objects
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 7

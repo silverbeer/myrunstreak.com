@@ -24,5 +24,5 @@ output "schedule_expression" {
 
 output "is_enabled" {
   description = "Whether the rule is currently enabled"
-  value       = aws_cloudwatch_event_rule.daily_sync.is_enabled
+  value       = aws_cloudwatch_event_rule.daily_sync.state == "ENABLED"
 }

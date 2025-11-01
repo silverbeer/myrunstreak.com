@@ -403,6 +403,9 @@ resource "aws_api_gateway_stage" "main" {
   xray_tracing_enabled = var.enable_xray_tracing
 
   tags = var.tags
+
+  # Must wait for API Gateway account settings to be configured
+  depends_on = [aws_api_gateway_account.main]
 }
 
 # Method settings for the stage

@@ -35,7 +35,7 @@ resource "aws_cloudwatch_event_rule" "daily_sync" {
   schedule_expression = var.schedule_expression
 
   # Enable/disable without deleting
-  is_enabled = var.enabled
+  state = var.enabled ? "ENABLED" : "DISABLED"
 
   tags = merge(
     var.tags,
@@ -76,8 +76,8 @@ resource "aws_cloudwatch_event_target" "lambda" {
 
   # Retry policy
   retry_policy {
-    maximum_event_age       = var.maximum_event_age_seconds
-    maximum_retry_attempts  = var.maximum_retry_attempts
+    maximum_event_age_in_seconds = var.maximum_event_age_seconds
+    maximum_retry_attempts       = var.maximum_retry_attempts
   }
 
   # Dead letter queue (optional)

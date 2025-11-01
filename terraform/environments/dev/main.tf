@@ -4,16 +4,15 @@
 terraform {
   required_version = ">= 1.5.0"
 
-  # IMPORTANT: Run the bootstrap configuration first to create this backend
-  # After bootstrap completes, uncomment the backend block below and run terraform init
+  
 
-  # backend "s3" {
-  #   bucket         = "myrunstreak-terraform-state-<YOUR_ACCOUNT_ID>"
-  #   key            = "myrunstreak/dev/terraform.tfstate"
-  #   region         = "us-east-2"
-  #   dynamodb_table = "myrunstreak-terraform-locks"
-  #   encrypt        = true
-  # }
+  backend "s3" {
+    bucket         = "myrunstreak-terraform-state-855323747881"
+    key            = "myrunstreak/dev/terraform.tfstate"
+    region         = "us-east-2"
+    dynamodb_table = "myrunstreak-terraform-locks"
+    encrypt        = true
+  }
 
   required_providers {
     aws = {
@@ -149,9 +148,9 @@ module "lambda" {
   enable_xray_tracing = false  # Enable for distributed tracing
   enable_alarms       = true
 
-  # Permissions (will be added by API Gateway and EventBridge modules)
-  api_gateway_execution_arn = null  # Set after API Gateway is created
-  eventbridge_rule_arn      = null  # Set after EventBridge is created
+  # Permissions will be created separately below to avoid circular dependencies
+  api_gateway_execution_arn = null
+  eventbridge_rule_arn      = null
 
   tags = local.common_tags
 
@@ -231,4 +230,31 @@ module "eventbridge" {
   tags = local.common_tags
 
   depends_on = [module.lambda]
+}
+# ==============================================================================
+# Lambda Permissions
+# ==============================================================================
+# Created separately from Lambda module to avoid circular dependencies
+# These permissions allow API Gateway and EventBridge to invoke the Lambda function
+
+resource "aws_lambda_permission" "api_gateway_invoke" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+
+  # Source ARN restricts which API Gateway can invoke
+  # Format: arn:aws:execute-api:region:account:api-id/stage/method/path
+  source_arn = "${module.api_gateway.api_execution_arn}/*/*"
+  # /*/* means any stage, any method/path
+}
+
+resource "aws_lambda_permission" "eventbridge_invoke" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.lambda.function_name
+  principal     = "events.amazonaws.com"
+
+  # Source ARN restricts which EventBridge rule can invoke
+  source_arn = module.eventbridge.rule_arn
 }
