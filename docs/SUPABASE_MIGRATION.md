@@ -34,6 +34,78 @@ This migration transforms the application from a single-user architecture using 
 
 ## Phase 6: OAuth Token Migration
 
+### Local Testing Options
+
+Before running the migration against real AWS resources, you can test locally:
+
+#### Option 1: Moto (Recommended, Built-in)
+
+Uses moto to mock AWS Secrets Manager - no additional setup required:
+
+```bash
+# Run local migration test
+uv run python scripts/test_oauth_migration_local.py
+```
+
+This test:
+- ✅ Creates mock AWS Secrets Manager
+- ✅ Sets up test OAuth token in old structure
+- ✅ Runs full migration flow
+- ✅ Validates migration success
+- ✅ Automatically rolls back changes
+- ✅ No real AWS resources touched
+
+**Output:**
+```
+============================================================
+🧪 Testing OAuth Token Migration Locally
+============================================================
+
+🔧 Setting up mock AWS Secrets Manager...
+✅ Created old secret
+
+🔗 Connecting to local Supabase...
+✅ Found 1 active source(s)
+
+🔄 Starting migration test...
+✅ Created new secret
+✅ Updated database
+✅ Validation passed
+
+============================================================
+🎉 All Migration Tests Passed!
+============================================================
+
+✅ Migration script logic validated
+✅ Ready for production migration
+```
+
+#### Option 2: LocalStack (Optional, More Comprehensive)
+
+For a more realistic AWS environment emulation:
+
+```bash
+# Start LocalStack
+docker-compose -f docker-compose.localstack.yml up -d
+
+# Configure environment to use LocalStack
+export AWS_ENDPOINT_URL=http://localhost:4566
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+export AWS_DEFAULT_REGION=us-east-2
+
+# Create test secret in LocalStack
+aws --endpoint-url=http://localhost:4566 secretsmanager create-secret \
+  --name myrunstreak/dev/smashrun/oauth \
+  --secret-string '{"access_token":"test","refresh_token":"test","expires_at":"2026-01-01T00:00:00Z"}'
+
+# Run migration (dry-run)
+uv run python scripts/migrate_oauth_tokens.py --dry-run
+
+# Stop LocalStack when done
+docker-compose -f docker-compose.localstack.yml down
+```
+
 ### Token Structure Migration
 
 **Old Structure (Single-User):**
