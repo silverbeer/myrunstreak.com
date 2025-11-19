@@ -12,15 +12,15 @@
 -- - Indexes for query performance
 -- =====================================================
 
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Note: gen_random_uuid() is built-in to PostgreSQL 13+ (used by Supabase)
+-- No extensions needed for UUID generation
 
 -- =====================================================
 -- USERS & AUTHENTICATION
 -- =====================================================
 
 CREATE TABLE users (
-    user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE,
     display_name VARCHAR(100),
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -39,7 +39,7 @@ COMMENT ON COLUMN users.email IS 'Optional for now, will be required when proper
 CREATE TYPE source_type AS ENUM ('smashrun', 'strava', 'garmin', 'other');
 
 CREATE TABLE user_sources (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     source_type source_type NOT NULL,
 
@@ -80,7 +80,7 @@ CREATE TYPE device_type AS ENUM ('apple', 'google', 'garmin', 'other');
 
 CREATE TABLE runs (
     -- Primary Key
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Foreign Keys
     user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -165,7 +165,7 @@ COMMENT ON COLUMN runs.source_activity_id IS 'Unique ID from source API (SmashRu
 -- =====================================================
 
 CREATE TABLE splits (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
 
     -- Split Identification
@@ -199,7 +199,7 @@ COMMENT ON TABLE splits IS 'Per-mile or per-km splits for runs';
 -- =====================================================
 
 CREATE TABLE recording_data (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id UUID NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE,
 
     -- Time series data (stored as PostgreSQL arrays)
@@ -224,7 +224,7 @@ COMMENT ON COLUMN recording_data.recording_values IS '2D array where recording_v
 CREATE TYPE lap_type AS ENUM ('general', 'warmup', 'work', 'recovery', 'cooldown');
 
 CREATE TABLE laps (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
 
     lap_number INTEGER NOT NULL,
@@ -248,7 +248,7 @@ COMMENT ON TABLE laps IS 'Lap/interval data for structured workouts';
 -- =====================================================
 
 CREATE TABLE sync_history (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source_id UUID NOT NULL REFERENCES user_sources(id) ON DELETE CASCADE,
 
     -- Sync execution
