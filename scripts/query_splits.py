@@ -41,7 +41,9 @@ def main():
             LIMIT 20
         """).fetchall()
 
-        print(f"{'Date':<12} {'Mile':<6} {'Pace':<8} {'HR':<5} {'Elev+':<8} {'Run Dist':<10} {'Run Avg':<10}")
+        print(
+            f"{'Date':<12} {'Mile':<6} {'Pace':<8} {'HR':<5} {'Elev+':<8} {'Run Dist':<10} {'Run Avg':<10}"
+        )
         print("-" * 100)
 
         for row in fastest_splits:
@@ -52,7 +54,9 @@ def main():
             dist_str = f"{dist:.2f}mi"
             avg_str = f"{avg_pace:.1f}" if avg_pace else "N/A"
 
-            print(f"{date} Mile {split_num:<4} {pace_str:<8} {hr_str:<5} {elev_str:<8} {dist_str:<10} {avg_str:<10}")
+            print(
+                f"{date} Mile {split_num:<4} {pace_str:<8} {hr_str:<5} {elev_str:<8} {dist_str:<10} {avg_str:<10}"
+            )
 
         print()
         print("=" * 100)
@@ -92,7 +96,9 @@ def main():
             avg_pace_str = f"{avg_min}:{avg_sec:02d}"
             best_pace_str = f"{best_min}:{best_sec:02d}"
             slow_pace_str = f"{slow_min}:{slow_sec:02d}"
-            print(f"Mile {mile_num:<3} {count:<8} {avg_pace_str:<12} {best_pace_str:<12} {slow_pace_str:<12}")
+            print(
+                f"Mile {mile_num:<3} {count:<8} {avg_pace_str:<12} {best_pace_str:<12} {slow_pace_str:<12}"
+            )
 
         print()
         print("=" * 100)
@@ -119,7 +125,9 @@ def main():
             ORDER BY split_number
         """).fetchall()
 
-        print(f"{'Mile':<6} {'Distance':<10} {'Time':<10} {'Pace':<10} {'HR':<5} {'Cumul Dist':<12} {'Cumul Time':<12}")
+        print(
+            f"{'Mile':<6} {'Distance':<10} {'Time':<10} {'Pace':<10} {'HR':<5} {'Cumul Dist':<12} {'Cumul Time':<12}"
+        )
         print("-" * 100)
 
         for row in sample_run:
@@ -135,7 +143,9 @@ def main():
             cum_time_sec = int(cum_time % 60)
             cum_time_str = f"{cum_time_min}:{cum_time_sec:02d}"
 
-            print(f"{split_num:<6} {dist_str:<10} {time_str:<10} {pace_str:<10} {hr_str:<5} {cum_dist_str:<12} {cum_time_str:<12}")
+            print(
+                f"{split_num:<6} {dist_str:<10} {time_str:<10} {pace_str:<10} {hr_str:<5} {cum_dist_str:<12} {cum_time_str:<12}"
+            )
 
         print()
         print("=" * 100)

@@ -95,7 +95,7 @@ def main():
             print_table(
                 "Recent Runs (Last 10)",
                 recent,
-                ["Date", "Miles", "Duration (min)", "Pace (min/mi)", "Terrain", "Felt"]
+                ["Date", "Miles", "Duration (min)", "Pace (min/mi)", "Terrain", "Felt"],
             )
 
         # Monthly summary
@@ -115,7 +115,7 @@ def main():
             print_table(
                 "Monthly Summary (Last 12 Months)",
                 monthly,
-                ["Month", "Runs", "Total Miles", "Avg Miles", "Avg Pace"]
+                ["Month", "Runs", "Total Miles", "Avg Miles", "Avg Pace"],
             )
 
         # Streak analysis
@@ -130,11 +130,7 @@ def main():
         """).fetchall()
 
         if streaks:
-            print_table(
-                "Top 5 Running Streaks",
-                streaks,
-                ["Start Date", "End Date", "Days"]
-            )
+            print_table("Top 5 Running Streaks", streaks, ["Start Date", "End Date", "Days"])
 
         # Personal records
         print("\n" + "=" * 80)
@@ -160,7 +156,9 @@ def main():
             LIMIT 1
         """).fetchone()
         if fastest:
-            print(f"Fastest Pace:      {fastest[1]:.1f} min/mile on {fastest[0]} ({fastest[2]:.1f} mi)")
+            print(
+                f"Fastest Pace:      {fastest[1]:.1f} min/mile on {fastest[0]} ({fastest[2]:.1f} mi)"
+            )
 
         # Most distance in a week
         weekly = conn.execute("""
@@ -187,7 +185,9 @@ def main():
             LIMIT 1
         """).fetchone()
         if max_month:
-            print(f"Most Runs/Month:   {max_month[2]} runs in {max_month[0]}-{max_month[1]:02d} ({max_month[3]:.1f} miles)")
+            print(
+                f"Most Runs/Month:   {max_month[2]} runs in {max_month[0]}-{max_month[1]:02d} ({max_month[3]:.1f} miles)"
+            )
 
         print("\n" + "=" * 80)
         print(f"Database: {DUCKDB_FILE.absolute()}")

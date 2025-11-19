@@ -8,6 +8,7 @@ This handler is invoked by:
 - EventBridge (daily scheduled sync)
 - API Gateway (manual sync trigger)
 """
+
 import json
 import logging
 from datetime import datetime
@@ -31,28 +32,25 @@ def handler(event, context):
     logger.info(f"Lambda invoked: {json.dumps(event)}")
 
     # Determine invocation source
-    source = event.get('source', 'api-gateway')
+    source = event.get("source", "api-gateway")
 
     result = {
-        'status': 'success',
-        'message': 'Placeholder Lambda function - deploy actual code via GitHub Actions',
-        'source': source,
-        'timestamp': datetime.utcnow().isoformat(),
-        'function_name': context.function_name,
-        'function_version': context.function_version,
+        "status": "success",
+        "message": "Placeholder Lambda function - deploy actual code via GitHub Actions",
+        "source": source,
+        "timestamp": datetime.utcnow().isoformat(),
+        "function_name": context.function_name,
+        "function_version": context.function_version,
     }
 
     logger.info(f"Response: {result}")
 
     # Return response for API Gateway
-    if source == 'api-gateway' or 'httpMethod' in event:
+    if source == "api-gateway" or "httpMethod" in event:
         return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps(result)
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps(result),
         }
 
     # Return simple dict for EventBridge

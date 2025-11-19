@@ -60,7 +60,7 @@ class DuckDBManager:
         if self._connection is None:
             if self._is_s3:
                 self._download_from_s3()
-                database_path = self._local_path
+                database_path: str | Path = self._local_path or self.original_path
             else:
                 database_path = self.original_path
 
@@ -184,9 +184,7 @@ class DuckDBManager:
         conn = self.connect()
 
         try:
-            result = conn.execute(
-                "SELECT MAX(version) FROM schema_version"
-            ).fetchone()
+            result = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
             return result[0] if result else None
         except duckdb.CatalogException:
             # schema_version table doesn't exist yet

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from .enums import ActivityType, DeviceType, HowFelt, Terrain, WeatherType
 from .nested import HeartRateRecovery, Lap, Song
@@ -187,7 +187,7 @@ class Activity(BaseModel):
     @field_validator("recording_values")
     @classmethod
     def validate_recording_values(
-        cls, v: list[list[float]] | None, info
+        cls, v: list[list[float]] | None, info: ValidationInfo
     ) -> list[list[float]] | None:
         """Ensure recording_values length matches recording_keys if both are present."""
         if v is not None:

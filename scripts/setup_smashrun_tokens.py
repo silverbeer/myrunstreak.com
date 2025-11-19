@@ -70,11 +70,15 @@ def main() -> None:
     print("\nStep 4: Store Tokens in AWS Secrets Manager")
     print("-" * 60)
 
-    confirm = input(
-        "\nThis will store tokens in AWS Secrets Manager.\n"
-        "Make sure you have AWS credentials configured.\n"
-        "Continue? [y/N]: "
-    ).strip().lower()
+    confirm = (
+        input(
+            "\nThis will store tokens in AWS Secrets Manager.\n"
+            "Make sure you have AWS credentials configured.\n"
+            "Continue? [y/N]: "
+        )
+        .strip()
+        .lower()
+    )
 
     if confirm != "y":
         print("Aborted.")
@@ -97,7 +101,7 @@ def main() -> None:
         )
 
         print("✓ Successfully stored tokens in AWS Secrets Manager")
-        print(f"  Secret Name: myrunstreak/smashrun/tokens")
+        print("  Secret Name: myrunstreak/smashrun/tokens")
         print(f"  Region: {settings.aws_region}")
 
     except Exception as e:

@@ -1,6 +1,6 @@
 """Tests for SmashRun API client."""
 
-from datetime import date, datetime, timezone
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -99,9 +99,7 @@ def test_get_activities_with_date_filter(mock_client_class, api_client, sample_a
     # Fetch activities with date filter
     since_date = date(2024, 10, 1)
     until_date = date(2024, 10, 31)
-    activities = api_client.get_activities(
-        page=0, count=50, since=since_date, until=until_date
-    )
+    _ = api_client.get_activities(page=0, count=50, since=since_date, until=until_date)
 
     # Verify
     call_args = mock_client.get.call_args

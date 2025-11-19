@@ -1,6 +1,6 @@
 """Tests for Pydantic data models."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,7 +21,7 @@ def test_minimal_activity():
     """Test creating an activity with only required fields."""
     activity = Activity(
         activityId="test-123",
-        startDateTimeLocal=datetime.now(timezone.utc),
+        startDateTimeLocal=datetime.now(UTC),
         distance=5.0,
         duration=1800,
     )
@@ -36,7 +36,7 @@ def test_activity_with_all_fields():
     """Test creating an activity with all optional fields populated."""
     activity = Activity(
         activityId="test-456",
-        startDateTimeLocal=datetime(2024, 10, 30, 8, 0, 0, tzinfo=timezone.utc),
+        startDateTimeLocal=datetime(2024, 10, 30, 8, 0, 0, tzinfo=UTC),
         distance=10.5,
         duration=3600,
         activityType="running",
@@ -71,7 +71,7 @@ def test_activity_computed_properties():
     # 5 km in 30 minutes (1800 seconds)
     activity = Activity(
         activityId="test-789",
-        startDateTimeLocal=datetime.now(timezone.utc),
+        startDateTimeLocal=datetime.now(UTC),
         distance=5.0,
         duration=1800,
     )
@@ -88,7 +88,7 @@ def test_activity_validation_distance():
     with pytest.raises(ValueError):
         Activity(
             activityId="test-invalid",
-            startDateTimeLocal=datetime.now(timezone.utc),
+            startDateTimeLocal=datetime.now(UTC),
             distance=0,  # Invalid: must be > 0
             duration=1800,
         )
@@ -99,7 +99,7 @@ def test_activity_validation_duration():
     with pytest.raises(ValueError):
         Activity(
             activityId="test-invalid",
-            startDateTimeLocal=datetime.now(timezone.utc),
+            startDateTimeLocal=datetime.now(UTC),
             distance=5.0,
             duration=0,  # Invalid: must be > 0
         )
@@ -109,7 +109,7 @@ def test_activity_with_recording_data():
     """Test activity with time series recording data."""
     activity = Activity(
         activityId="test-recording",
-        startDateTimeLocal=datetime.now(timezone.utc),
+        startDateTimeLocal=datetime.now(UTC),
         distance=5.0,
         duration=1800,
         recordingKeys=["clock", "distance", "heartRate"],
@@ -131,7 +131,7 @@ def test_activity_recording_data_validation():
     with pytest.raises(ValueError, match="recording_values length"):
         Activity(
             activityId="test-invalid",
-            startDateTimeLocal=datetime.now(timezone.utc),
+            startDateTimeLocal=datetime.now(UTC),
             distance=5.0,
             duration=1800,
             recordingKeys=["clock", "distance"],
@@ -186,7 +186,7 @@ def test_activity_with_nested_objects():
     """Test activity with laps, songs, and heart rate recovery."""
     activity = Activity(
         activityId="test-nested",
-        startDateTimeLocal=datetime.now(timezone.utc),
+        startDateTimeLocal=datetime.now(UTC),
         distance=10.0,
         duration=3600,
         laps=[
@@ -224,7 +224,7 @@ def test_activity_alias_support():
     # Using snake_case
     activity1 = Activity(
         activity_id="test-1",
-        start_date_time_local=datetime.now(timezone.utc),
+        start_date_time_local=datetime.now(UTC),
         distance=5.0,
         duration=1800,
         cadence_average=170.0,
@@ -233,7 +233,7 @@ def test_activity_alias_support():
     # Using camelCase (API format)
     activity2 = Activity(
         activityId="test-2",
-        startDateTimeLocal=datetime.now(timezone.utc),
+        startDateTimeLocal=datetime.now(UTC),
         distance=5.0,
         duration=1800,
         cadenceAverage=170.0,

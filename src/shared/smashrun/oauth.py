@@ -1,11 +1,11 @@
 """SmashRun OAuth 2.0 client implementation."""
 
 import logging
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
 import httpx
-from authlib.integrations.httpx_client import OAuth2Client
+from authlib.integrations.httpx_client import OAuth2Client  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class SmashRunOAuthClient:
                 headers={"Accept": "application/json"},
             )
             response.raise_for_status()
-            token_data = response.json()
+            token_data = cast(dict[str, Any], response.json())
 
         logger.info("Successfully obtained access token")
         return token_data
@@ -136,7 +136,7 @@ class SmashRunOAuthClient:
                 headers={"Accept": "application/json"},
             )
             response.raise_for_status()
-            token_data = response.json()
+            token_data = cast(dict[str, Any], response.json())
 
         logger.info("Successfully refreshed access token")
         return token_data

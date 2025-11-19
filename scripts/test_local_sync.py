@@ -11,7 +11,7 @@ Usage:
 
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from src.shared.config import get_settings
@@ -19,8 +19,7 @@ from src.shared.duckdb_ops import DuckDBManager, RunRepository
 from src.shared.smashrun import SmashRunAPIClient, SmashRunOAuthClient
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,7 @@ def run_oauth_flow(oauth_client: SmashRunOAuthClient) -> dict:
 
     # Add expiration timestamp
     token_data["expires_at"] = (
-        datetime.now(timezone.utc) + timedelta(seconds=token_data["expires_in"])
+        datetime.now(UTC) + timedelta(seconds=token_data["expires_in"])
     ).isoformat()
 
     print("✓ Successfully obtained tokens")
@@ -80,10 +79,7 @@ def save_tokens(token_data: dict):
 def load_tokens() -> dict:
     """Load tokens from local file."""
     if not TOKENS_FILE.exists():
-        raise FileNotFoundError(
-            f"Tokens file not found: {TOKENS_FILE}\n"
-            "Run OAuth flow first."
-        )
+        raise FileNotFoundError(f"Tokens file not found: {TOKENS_FILE}\nRun OAuth flow first.")
 
     with open(TOKENS_FILE) as f:
         return json.load(f)
@@ -102,15 +98,15 @@ def get_valid_access_token(oauth_client: SmashRunOAuthClient) -> str:
     expires_at = datetime.fromisoformat(token_data["expires_at"])
     # Make expires_at timezone-aware if it isn't
     if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
+        expires_at = expires_at.replace(tzinfo=UTC)
+    now = datetime.now(UTC)
 
     if now + timedelta(days=1) >= expires_at:
         logger.info("Token expired or expiring soon, refreshing...")
 
         new_tokens = oauth_client.refresh_access_token(token_data["refresh_token"])
         new_tokens["expires_at"] = (
-            datetime.now(timezone.utc) + timedelta(seconds=new_tokens["expires_in"])
+            datetime.now(UTC) + timedelta(seconds=new_tokens["expires_in"])
         ).isoformat()
 
         save_tokens(new_tokens)
@@ -140,7 +136,7 @@ def update_sync_state(sync_date: date, runs_synced: int):
     """Update sync state in local file."""
     state = {
         "last_sync_date": sync_date.isoformat(),
-        "last_sync_timestamp": datetime.now(timezone.utc).isoformat(),
+        "last_sync_timestamp": datetime.now(UTC).isoformat(),
         "runs_synced": runs_synced,
     }
 
@@ -236,7 +232,7 @@ def show_stats():
         # Latest run
         latest_run = repo.get_latest_run()
         if latest_run:
-            print(f"\nLatest Run:")
+            print("\nLatest Run:")
             print(f"  Date: {latest_run['start_date']}")
             print(f"  Distance: {latest_run['distance_km'] * 0.621371:.2f} miles")
             print(f"  Duration: {latest_run['duration_seconds'] // 60} minutes")
@@ -253,7 +249,7 @@ def show_stats():
         """).fetchone()
 
         if result:
-            print(f"\nOverall Statistics:")
+            print("\nOverall Statistics:")
             print(f"  Total Distance: {result[1]:.1f} miles")
             print(f"  Average Distance: {result[2]:.1f} miles per run")
             print(f"  Average Pace: {result[3]:.1f} min/mile")

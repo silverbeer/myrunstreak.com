@@ -1,7 +1,7 @@
 """Repository pattern for run data operations."""
 
 import logging
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import duckdb
@@ -212,11 +212,9 @@ class RunRepository:
 
         # Get column names
         columns = [desc[0] for desc in self.connection.description]
-        return dict(zip(columns, result))
+        return dict(zip(columns, result, strict=True))
 
-    def get_runs_by_date_range(
-        self, start_date: date, end_date: date
-    ) -> list[dict[str, Any]]:
+    def get_runs_by_date_range(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
         """
         Retrieve runs within a date range.
 
@@ -237,7 +235,7 @@ class RunRepository:
         ).fetchall()
 
         columns = [desc[0] for desc in self.connection.description]
-        return [dict(zip(columns, row)) for row in results]
+        return [dict(zip(columns, row, strict=True)) for row in results]
 
     def get_latest_run(self) -> dict[str, Any] | None:
         """
@@ -258,7 +256,7 @@ class RunRepository:
             return None
 
         columns = [desc[0] for desc in self.connection.description]
-        return dict(zip(columns, result))
+        return dict(zip(columns, result, strict=True))
 
     def get_total_runs(self) -> int:
         """
