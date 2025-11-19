@@ -139,31 +139,24 @@ class RunsRepository:
         """
         Get overall running statistics for a user.
 
+        Uses client-side aggregation for now (PostgREST doesn't support aggregate functions).
+        TODO: Create stored procedure for server-side aggregation.
+
         Args:
             user_id: User UUID
 
         Returns:
             Dict with total_runs, total_km, avg_km, longest_run_km, avg_pace
         """
-        # Use aggregate query
+        # Get all runs for user (we'll aggregate client-side)
         result = (
             self.supabase.table("runs")
-            .select(
-                "distance_km.sum(),distance_km.avg(),distance_km.max(),average_pace_min_per_km.avg()"
-            )
+            .select("distance_km, average_pace_min_per_km")
             .eq("user_id", str(user_id))
             .execute()
         )
 
-        # Also get count
-        count_result = (
-            self.supabase.table("runs")
-            .select("*", count="exact")
-            .eq("user_id", str(user_id))
-            .execute()
-        )
-
-        if not result.data or count_result.count == 0:
+        if not result.data or len(result.data) == 0:
             return {
                 "total_runs": 0,
                 "total_km": 0,
@@ -172,14 +165,22 @@ class RunsRepository:
                 "avg_pace_min_per_km": 0,
             }
 
-        stats = result.data[0]
+        # Client-side aggregation
+        runs = result.data
+        total_runs = len(runs)
+        distances = [float(r["distance_km"]) for r in runs]
+        paces = [
+            float(r["average_pace_min_per_km"])
+            for r in runs
+            if r["average_pace_min_per_km"] is not None
+        ]
 
         return {
-            "total_runs": count_result.count or 0,
-            "total_km": round(float(stats.get("sum", 0) or 0), 2),
-            "avg_km": round(float(stats.get("avg", 0) or 0), 2),
-            "longest_run_km": round(float(stats.get("max", 0) or 0), 2),
-            "avg_pace_min_per_km": round(float(stats.get("avg_1", 0) or 0), 2),
+            "total_runs": total_runs,
+            "total_km": round(sum(distances), 2),
+            "avg_km": round(sum(distances) / total_runs, 2) if total_runs > 0 else 0,
+            "longest_run_km": round(max(distances), 2) if distances else 0,
+            "avg_pace_min_per_km": round(sum(paces) / len(paces), 2) if paces else 0,
         }
 
     def get_monthly_stats(
