@@ -33,10 +33,7 @@ class SyncStateManager:
         self.secret_name = secret_name
         self.region_name = region_name
 
-        self._secrets_client = boto3.client(
-            "secretsmanager",
-            region_name=region_name
-        )
+        self._secrets_client = boto3.client("secretsmanager", region_name=region_name)
 
     def get_last_sync_date(self) -> date:
         """
@@ -49,9 +46,7 @@ class SyncStateManager:
         logger.info(f"Retrieving last sync date from: {self.secret_name}")
 
         try:
-            response = self._secrets_client.get_secret_value(
-                SecretId=self.secret_name
-            )
+            response = self._secrets_client.get_secret_value(SecretId=self.secret_name)
 
             state_data = json.loads(response["SecretString"])
             last_sync_str = state_data.get("last_sync_date")
@@ -103,8 +98,7 @@ class SyncStateManager:
         try:
             # Try to update existing secret
             self._secrets_client.update_secret(
-                SecretId=self.secret_name,
-                SecretString=json.dumps(state_data)
+                SecretId=self.secret_name, SecretString=json.dumps(state_data)
             )
             logger.info(f"Successfully updated sync state ({runs_synced} runs)")
 

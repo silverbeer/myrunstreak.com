@@ -29,9 +29,10 @@ except ImportError:
 # Try to import rich for pretty output, fall back to basic output
 try:
     from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
     from rich.json import JSON
+    from rich.panel import Panel
+    from rich.table import Table
+
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -62,7 +63,7 @@ def make_request(endpoint: str, params: dict[str, Any] | None = None) -> dict[st
         response.raise_for_status()
         return response.json()
     except httpx.TimeoutException:
-        print(f"❌ Request timed out after 30 seconds")
+        print("❌ Request timed out after 30 seconds")
         sys.exit(1)
     except httpx.HTTPStatusError as e:
         print(f"❌ HTTP error {e.response.status_code}: {e.response.text}")
@@ -83,11 +84,11 @@ def print_json(data: dict[str, Any]) -> None:
 
 def print_overall_stats(data: dict[str, Any]) -> None:
     """Print overall statistics."""
-    total_miles = km_to_miles(data.get('total_km', 0))
-    avg_miles = km_to_miles(data.get('avg_km', 0))
-    longest_miles = km_to_miles(data.get('longest_run_km', 0))
+    total_miles = km_to_miles(data.get("total_km", 0))
+    avg_miles = km_to_miles(data.get("avg_km", 0))
+    longest_miles = km_to_miles(data.get("longest_run_km", 0))
     # Pace conversion: min/km to min/mile
-    pace_min_per_mile = data.get('avg_pace_min_per_km', 0) / KM_TO_MILES
+    pace_min_per_mile = data.get("avg_pace_min_per_km", 0) / KM_TO_MILES
 
     if RICH_AVAILABLE:
         console = Console()
@@ -129,9 +130,13 @@ def print_recent_runs(data: dict[str, Any]) -> None:
         table.add_column("Temp (°F)", justify="right")
 
         for run in runs:
-            distance_miles = km_to_miles(run.get('distance_km', 0))
-            pace_min_per_mile = run.get('avg_pace_min_per_km', 0) / KM_TO_MILES
-            temp_f = run.get('temperature_celsius', 0) * 9/5 + 32 if run.get('temperature_celsius') else None
+            distance_miles = km_to_miles(run.get("distance_km", 0))
+            pace_min_per_mile = run.get("avg_pace_min_per_km", 0) / KM_TO_MILES
+            temp_f = (
+                run.get("temperature_celsius", 0) * 9 / 5 + 32
+                if run.get("temperature_celsius")
+                else None
+            )
 
             table.add_row(
                 run.get("date", "")[:10],  # Just the date part
@@ -147,11 +152,13 @@ def print_recent_runs(data: dict[str, Any]) -> None:
         print(f"\n🏃 Recent Runs ({data.get('count', 0)} runs)")
         print("=" * 80)
         for run in runs:
-            distance_miles = km_to_miles(run.get('distance_km', 0))
-            pace_min_per_mile = run.get('avg_pace_min_per_km', 0) / KM_TO_MILES
-            print(f"{run.get('date', '')[:10]}: {distance_miles:.2f} mi, "
-                  f"{run.get('duration_minutes', 0):.1f} min, "
-                  f"{pace_min_per_mile:.2f} min/mi")
+            distance_miles = km_to_miles(run.get("distance_km", 0))
+            pace_min_per_mile = run.get("avg_pace_min_per_km", 0) / KM_TO_MILES
+            print(
+                f"{run.get('date', '')[:10]}: {distance_miles:.2f} mi, "
+                f"{run.get('duration_minutes', 0):.1f} min, "
+                f"{pace_min_per_mile:.2f} min/mi"
+            )
 
 
 def print_monthly_stats(data: dict[str, Any]) -> None:
@@ -161,7 +168,9 @@ def print_monthly_stats(data: dict[str, Any]) -> None:
     if RICH_AVAILABLE:
         console = Console()
 
-        table = Table(title=f"📅 Monthly Statistics ({data.get('count', 0)} months)", show_header=True)
+        table = Table(
+            title=f"📅 Monthly Statistics ({data.get('count', 0)} months)", show_header=True
+        )
         table.add_column("Month", style="cyan")
         table.add_column("Runs", justify="right", style="green")
         table.add_column("Total (mi)", justify="right")
@@ -169,9 +178,9 @@ def print_monthly_stats(data: dict[str, Any]) -> None:
         table.add_column("Avg Pace", justify="right", style="yellow")
 
         for month in months:
-            total_miles = km_to_miles(month.get('total_km', 0))
-            avg_miles = km_to_miles(month.get('avg_km', 0))
-            pace_min_per_mile = month.get('avg_pace_min_per_km', 0) / KM_TO_MILES
+            total_miles = km_to_miles(month.get("total_km", 0))
+            avg_miles = km_to_miles(month.get("avg_km", 0))
+            pace_min_per_mile = month.get("avg_pace_min_per_km", 0) / KM_TO_MILES
 
             table.add_row(
                 month.get("month", "")[:7],  # YYYY-MM
@@ -186,11 +195,13 @@ def print_monthly_stats(data: dict[str, Any]) -> None:
         print(f"\n📅 Monthly Statistics ({data.get('count', 0)} months)")
         print("=" * 80)
         for month in months:
-            total_miles = km_to_miles(month.get('total_km', 0))
-            avg_miles = km_to_miles(month.get('avg_km', 0))
-            print(f"{month.get('month', '')[:7]}: {month.get('run_count', 0)} runs, "
-                  f"{total_miles:.2f} mi total, "
-                  f"{avg_miles:.2f} mi avg")
+            total_miles = km_to_miles(month.get("total_km", 0))
+            avg_miles = km_to_miles(month.get("avg_km", 0))
+            print(
+                f"{month.get('month', '')[:7]}: {month.get('run_count', 0)} runs, "
+                f"{total_miles:.2f} mi total, "
+                f"{avg_miles:.2f} mi avg"
+            )
 
 
 def print_streaks(data: dict[str, Any]) -> None:
@@ -199,12 +210,14 @@ def print_streaks(data: dict[str, Any]) -> None:
         console = Console()
 
         # Current streak
-        console.print(Panel(
-            f"🔥 Current Streak: [bold green]{data.get('current_streak', 0)} days[/bold green]\n"
-            f"🏆 Longest Streak: [bold yellow]{data.get('longest_streak', 0)} days[/bold yellow]",
-            title="Running Streaks",
-            border_style="cyan"
-        ))
+        console.print(
+            Panel(
+                f"🔥 Current Streak: [bold green]{data.get('current_streak', 0)} days[/bold green]\n"
+                f"🏆 Longest Streak: [bold yellow]{data.get('longest_streak', 0)} days[/bold yellow]",
+                title="Running Streaks",
+                border_style="cyan",
+            )
+        )
 
         # Top streaks table
         table = Table(title="🎯 Top Streaks", show_header=True)
@@ -231,8 +244,10 @@ def print_streaks(data: dict[str, Any]) -> None:
         print("\nTop Streaks:")
         for streak in data.get("top_streaks", []):
             current = " (CURRENT)" if streak.get("is_current") else ""
-            print(f"  {streak.get('start_date', '')} to {streak.get('end_date', '')}: "
-                  f"{streak.get('length_days', 0)} days{current}")
+            print(
+                f"  {streak.get('start_date', '')} to {streak.get('end_date', '')}: "
+                f"{streak.get('length_days', 0)} days{current}"
+            )
 
 
 def print_records(data: dict[str, Any]) -> None:
@@ -247,39 +262,35 @@ def print_records(data: dict[str, Any]) -> None:
 
         if "longest_run" in data:
             lr = data["longest_run"]
-            distance_miles = km_to_miles(lr.get('distance_km', 0))
-            table.add_row(
-                "Longest Run",
-                f"{distance_miles:.2f} miles",
-                lr.get("date", "")
-            )
+            distance_miles = km_to_miles(lr.get("distance_km", 0))
+            table.add_row("Longest Run", f"{distance_miles:.2f} miles", lr.get("date", ""))
 
         if "fastest_pace" in data:
             fp = data["fastest_pace"]
-            pace_min_per_mile = fp.get('pace_min_per_km', 0) / KM_TO_MILES
-            distance_miles = km_to_miles(fp.get('distance_km', 0))
+            pace_min_per_mile = fp.get("pace_min_per_km", 0) / KM_TO_MILES
+            distance_miles = km_to_miles(fp.get("distance_km", 0))
             table.add_row(
                 "Fastest Pace (3+ mi)",
                 f"{pace_min_per_mile:.2f} min/mi ({distance_miles:.2f} mi)",
-                fp.get("date", "")
+                fp.get("date", ""),
             )
 
         if "most_km_week" in data:
             wk = data["most_km_week"]
-            total_miles = km_to_miles(wk.get('total_km', 0))
+            total_miles = km_to_miles(wk.get("total_km", 0))
             table.add_row(
                 "Most Distance (Week)",
                 f"{total_miles:.2f} miles",
-                f"Week of {wk.get('week_start', '')}"
+                f"Week of {wk.get('week_start', '')}",
             )
 
         if "most_km_month" in data:
             mo = data["most_km_month"]
-            total_miles = km_to_miles(mo.get('total_km', 0))
+            total_miles = km_to_miles(mo.get("total_km", 0))
             table.add_row(
                 "Most Distance (Month)",
                 f"{total_miles:.2f} miles ({mo.get('run_count', 0)} runs)",
-                mo.get("month", "")[:7]
+                mo.get("month", "")[:7],
             )
 
         console.print(table)
@@ -288,19 +299,19 @@ def print_records(data: dict[str, Any]) -> None:
         print("=" * 50)
         if "longest_run" in data:
             lr = data["longest_run"]
-            distance_miles = km_to_miles(lr.get('distance_km', 0))
+            distance_miles = km_to_miles(lr.get("distance_km", 0))
             print(f"Longest Run: {distance_miles:.2f} miles on {lr.get('date', '')}")
         if "fastest_pace" in data:
             fp = data["fastest_pace"]
-            pace_min_per_mile = fp.get('pace_min_per_km', 0) / KM_TO_MILES
+            pace_min_per_mile = fp.get("pace_min_per_km", 0) / KM_TO_MILES
             print(f"Fastest Pace: {pace_min_per_mile:.2f} min/mi on {fp.get('date', '')}")
         if "most_km_week" in data:
             wk = data["most_km_week"]
-            total_miles = km_to_miles(wk.get('total_km', 0))
+            total_miles = km_to_miles(wk.get("total_km", 0))
             print(f"Most Distance (Week): {total_miles:.2f} miles")
         if "most_km_month" in data:
             mo = data["most_km_month"]
-            total_miles = km_to_miles(mo.get('total_km', 0))
+            total_miles = km_to_miles(mo.get("total_km", 0))
             print(f"Most Distance (Month): {total_miles:.2f} miles ({mo.get('run_count', 0)} runs)")
 
 
@@ -358,8 +369,10 @@ def cmd_runs(args: argparse.Namespace) -> None:
     if args.json:
         print_json(data)
     else:
-        print(f"\nShowing runs {args.offset + 1} to {args.offset + data.get('count', 0)} "
-              f"of {data.get('total', 0)} total")
+        print(
+            f"\nShowing runs {args.offset + 1} to {args.offset + data.get('count', 0)} "
+            f"of {data.get('total', 0)} total"
+        )
         print_recent_runs(data)
 
 
@@ -379,13 +392,11 @@ Examples:
 
 Environment:
   API_BASE_URL  Override API endpoint (default: dev)
-        """
+        """,
     )
 
     parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output raw JSON instead of formatted tables"
+        "--json", action="store_true", help="Output raw JSON instead of formatted tables"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -395,11 +406,15 @@ Environment:
 
     # Recent runs
     recent_parser = subparsers.add_parser("recent", help="Get recent runs")
-    recent_parser.add_argument("--limit", type=int, default=10, help="Number of runs (default: 10, max: 100)")
+    recent_parser.add_argument(
+        "--limit", type=int, default=10, help="Number of runs (default: 10, max: 100)"
+    )
 
     # Monthly stats
     monthly_parser = subparsers.add_parser("monthly", help="Get monthly statistics")
-    monthly_parser.add_argument("--limit", type=int, default=12, help="Number of months (default: 12, max: 60)")
+    monthly_parser.add_argument(
+        "--limit", type=int, default=12, help="Number of months (default: 12, max: 60)"
+    )
 
     # Streaks
     subparsers.add_parser("streaks", help="Get running streak analysis")
@@ -409,8 +424,12 @@ Environment:
 
     # List runs
     runs_parser = subparsers.add_parser("runs", help="List all runs with pagination")
-    runs_parser.add_argument("--offset", type=int, default=0, help="Offset for pagination (default: 0)")
-    runs_parser.add_argument("--limit", type=int, default=50, help="Number of runs per page (default: 50, max: 100)")
+    runs_parser.add_argument(
+        "--offset", type=int, default=0, help="Offset for pagination (default: 0)"
+    )
+    runs_parser.add_argument(
+        "--limit", type=int, default=50, help="Number of runs per page (default: 50, max: 100)"
+    )
 
     args = parser.parse_args()
 

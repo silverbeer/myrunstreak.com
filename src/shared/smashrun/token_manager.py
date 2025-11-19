@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -38,10 +38,7 @@ class TokenManager:
         self.oauth_client = oauth_client
         self.region_name = region_name
 
-        self._secrets_client = boto3.client(
-            "secretsmanager",
-            region_name=region_name
-        )
+        self._secrets_client = boto3.client("secretsmanager", region_name=region_name)
 
     def get_tokens(self) -> dict[str, Any]:
         """
@@ -56,11 +53,9 @@ class TokenManager:
         logger.info(f"Retrieving tokens from secret: {self.secret_name}")
 
         try:
-            response = self._secrets_client.get_secret_value(
-                SecretId=self.secret_name
-            )
+            response = self._secrets_client.get_secret_value(SecretId=self.secret_name)
 
-            secret_data = json.loads(response["SecretString"])
+            secret_data = cast(dict[str, Any], json.loads(response["SecretString"]))
             logger.info("Successfully retrieved tokens")
             return secret_data
 
@@ -99,8 +94,7 @@ class TokenManager:
 
         try:
             self._secrets_client.update_secret(
-                SecretId=self.secret_name,
-                SecretString=json.dumps(secret_data)
+                SecretId=self.secret_name, SecretString=json.dumps(secret_data)
             )
             logger.info("Successfully updated tokens")
 
@@ -127,7 +121,7 @@ class TokenManager:
         # Check if token needs refresh
         expires_at_str = tokens.get("expires_at")
         if expires_at_str:
-            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
             now = datetime.utcnow().replace(tzinfo=expires_at.tzinfo)
 
             # Refresh if expired or expiring within 1 day
@@ -137,7 +131,7 @@ class TokenManager:
                 return self._refresh_and_update(tokens["refresh_token"])
 
         logger.info("Using existing access token")
-        return tokens["access_token"]
+        return cast(str, tokens["access_token"])
 
     def _refresh_and_update(self, refresh_token: str) -> str:
         """
@@ -166,7 +160,7 @@ class TokenManager:
             )
 
             logger.info("Successfully refreshed and updated tokens")
-            return new_tokens["access_token"]
+            return cast(str, new_tokens["access_token"])
 
         except Exception as e:
             logger.error(f"Failed to refresh token: {e}")

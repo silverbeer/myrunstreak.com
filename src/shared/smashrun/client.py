@@ -1,8 +1,8 @@
 """SmashRun API client for fetching running activities."""
 
 import logging
-from datetime import date, datetime
-from typing import Any
+from datetime import date
+from typing import Any, cast
 
 import httpx
 
@@ -96,7 +96,7 @@ class SmashRunAPIClient:
         response = self.client.get("/my/activities/search", params=params)
         response.raise_for_status()
 
-        activities = response.json()
+        activities = cast(list[dict[str, Any]], response.json())
         logger.info(f"Retrieved {len(activities)} activities")
 
         return activities
@@ -119,14 +119,12 @@ class SmashRunAPIClient:
         response = self.client.get(f"/my/activities/{activity_id}")
         response.raise_for_status()
 
-        activity = response.json()
+        activity = cast(dict[str, Any], response.json())
         logger.info(f"Retrieved activity {activity_id}")
 
         return activity
 
-    def get_activity_splits(
-        self, activity_id: str, unit: str = "mi"
-    ) -> list[dict[str, Any]]:
+    def get_activity_splits(self, activity_id: str, unit: str = "mi") -> list[dict[str, Any]]:
         """
         Fetch per-mile or per-kilometer splits for an activity.
 
@@ -148,14 +146,12 @@ class SmashRunAPIClient:
         response = self.client.get(f"/my/activities/{activity_id}/splits/{unit}")
         response.raise_for_status()
 
-        splits = response.json()
+        splits = cast(list[dict[str, Any]], response.json())
         logger.info(f"Retrieved {len(splits)} splits for activity {activity_id}")
 
         return splits
 
-    def get_all_activities_since(
-        self, since: date, batch_size: int = 100
-    ) -> list[dict[str, Any]]:
+    def get_all_activities_since(self, since: date, batch_size: int = 100) -> list[dict[str, Any]]:
         """
         Fetch all activities since a given date (handles pagination automatically).
 
@@ -175,9 +171,7 @@ class SmashRunAPIClient:
         page = 0
 
         while True:
-            activities = self.get_activities(
-                page=page, count=batch_size, since=since
-            )
+            activities = self.get_activities(page=page, count=batch_size, since=since)
 
             if not activities:
                 break
@@ -258,7 +252,7 @@ class SmashRunAPIClient:
         response = self.client.get("/my/userinfo")
         response.raise_for_status()
 
-        user_info = response.json()
+        user_info = cast(dict[str, Any], response.json())
         logger.info(f"Retrieved user info for: {user_info.get('userName')}")
 
         return user_info

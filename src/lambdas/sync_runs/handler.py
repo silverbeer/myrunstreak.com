@@ -1,6 +1,5 @@
 """Lambda function handler for daily SmashRun sync."""
 
-import logging
 from datetime import date
 from typing import Any
 
@@ -49,6 +48,7 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
 
         # Get secret names from environment (set by Terraform)
         import os
+
         smashrun_secret_name = os.getenv("SMASHRUN_SECRET_NAME", "myrunstreak/dev/smashrun/oauth")
 
         # Derive sync state secret name from SmashRun secret name

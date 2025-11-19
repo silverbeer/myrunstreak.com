@@ -6,13 +6,11 @@ No local database needed - uses your existing Lambda infrastructure!
 """
 
 import os
-from datetime import date
 from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
-
 
 # ============================================================================
 # Configuration
@@ -25,18 +23,22 @@ API_BASE_URL = "https://9fmuhcz4y0.execute-api.us-east-2.amazonaws.com/dev"
 # Pydantic Models
 # ============================================================================
 
+
 class APIResponse(BaseModel):
     """Generic API response."""
+
     data: dict[str, Any]
 
     def format(self) -> str:
         """Format the response nicely."""
         import json
+
         return json.dumps(self.data, indent=2, default=str)
 
 
 class APIDependency(BaseModel):
     """Dependency for API access."""
+
     base_url: str = Field(default=API_BASE_URL)
     timeout: float = Field(default=30.0)
 
@@ -50,7 +52,7 @@ class APIDependency(BaseModel):
 # ============================================================================
 
 agent = Agent(
-    'openai:gpt-4o',  # Or 'openai:gpt-3.5-turbo' for cheaper option
+    "openai:gpt-4o",  # Or 'openai:gpt-3.5-turbo' for cheaper option
     deps_type=APIDependency,
     system_prompt="""You are an enthusiastic running coach and data analyst helping a runner
     understand their training data.
@@ -81,6 +83,7 @@ agent = Agent(
 # Tools (API Endpoints)
 # ============================================================================
 
+
 @agent.tool
 async def get_overall_stats(ctx: RunContext[APIDependency]) -> APIResponse:
     """
@@ -95,10 +98,7 @@ async def get_overall_stats(ctx: RunContext[APIDependency]) -> APIResponse:
 
 
 @agent.tool
-async def get_recent_runs(
-    ctx: RunContext[APIDependency],
-    limit: int = 10
-) -> APIResponse:
+async def get_recent_runs(ctx: RunContext[APIDependency], limit: int = 10) -> APIResponse:
     """
     Get recent runs.
 
@@ -118,10 +118,7 @@ async def get_recent_runs(
 
 
 @agent.tool
-async def get_monthly_stats(
-    ctx: RunContext[APIDependency],
-    limit: int = 12
-) -> APIResponse:
+async def get_monthly_stats(ctx: RunContext[APIDependency], limit: int = 12) -> APIResponse:
     """
     Get monthly running statistics.
 
@@ -168,9 +165,7 @@ async def get_personal_records(ctx: RunContext[APIDependency]) -> APIResponse:
 
 @agent.tool
 async def list_runs(
-    ctx: RunContext[APIDependency],
-    offset: int = 0,
-    limit: int = 50
+    ctx: RunContext[APIDependency], offset: int = 0, limit: int = 50
 ) -> APIResponse:
     """
     List all runs with pagination.
@@ -195,6 +190,7 @@ async def list_runs(
 # Helper Functions
 # ============================================================================
 
+
 def format_api_response(response: APIResponse, response_type: str) -> str:
     """Format API responses in a readable way."""
     data = response.data
@@ -202,44 +198,47 @@ def format_api_response(response: APIResponse, response_type: str) -> str:
     if response_type == "overall":
         return f"""📊 Overall Statistics:
 
-🏃 Total Runs: {data.get('total_runs', 0):,}
-📏 Total Distance: {data.get('total_km', 0) * 0.621371:.1f} miles
-📈 Average per Run: {data.get('avg_km', 0) * 0.621371:.2f} miles
-🏆 Longest Run: {data.get('longest_run_km', 0) * 0.621371:.2f} miles
-⚡ Average Pace: {data.get('avg_pace_min_per_km', 0) / 0.621371:.2f} min/mile"""
+🏃 Total Runs: {data.get("total_runs", 0):,}
+📏 Total Distance: {data.get("total_km", 0) * 0.621371:.1f} miles
+📈 Average per Run: {data.get("avg_km", 0) * 0.621371:.2f} miles
+🏆 Longest Run: {data.get("longest_run_km", 0) * 0.621371:.2f} miles
+⚡ Average Pace: {data.get("avg_pace_min_per_km", 0) / 0.621371:.2f} min/mile"""
 
     elif response_type == "streaks":
         return f"""🔥 Streak Information:
 
-Current Streak: {data.get('current_streak', 0):,} days
-Longest Streak: {data.get('longest_streak', 0):,} days
+Current Streak: {data.get("current_streak", 0):,} days
+Longest Streak: {data.get("longest_streak", 0):,} days
 
 Top Streaks:
-""" + "\n".join([
-            f"  {i+1}. {s['start_date']} to {s['end_date']}: {s['length_days']} days {'← Current' if s.get('is_current') else ''}"
-            for i, s in enumerate(data.get('top_streaks', [])[:5])
-        ])
+""" + "\n".join(
+            [
+                f"  {i + 1}. {s['start_date']} to {s['end_date']}: {s['length_days']} days {'← Current' if s.get('is_current') else ''}"
+                for i, s in enumerate(data.get("top_streaks", [])[:5])
+            ]
+        )
 
     elif response_type == "records":
         records = data
         output = "🏆 Personal Records:\n\n"
 
-        if 'longest_run' in records:
-            lr = records['longest_run']
+        if "longest_run" in records:
+            lr = records["longest_run"]
             output += f"📏 Longest Run: {lr['distance_km'] * 0.621371:.2f} miles on {lr['date']}\n"
 
-        if 'fastest_pace' in records:
-            fp = records['fastest_pace']
+        if "fastest_pace" in records:
+            fp = records["fastest_pace"]
             output += f"⚡ Fastest Pace: {fp['pace_min_per_km'] / 0.621371:.2f} min/mile ({fp['distance_km'] * 0.621371:.1f} mi on {fp['date']})\n"
 
-        if 'most_km_month' in records:
-            mm = records['most_km_month']
+        if "most_km_month" in records:
+            mm = records["most_km_month"]
             output += f"📅 Best Month: {mm['month']} - {mm['total_km'] * 0.621371:.1f} miles in {mm['run_count']} runs\n"
 
         return output
 
     # Default: pretty JSON
     import json
+
     return json.dumps(data, indent=2, default=str)
 
 
@@ -247,11 +246,12 @@ Top Streaks:
 # Main Chat Interface
 # ============================================================================
 
+
 async def main():
     """Interactive chat loop."""
-    print("="*70)
+    print("=" * 70)
     print("🏃 Welcome to RunStreak Chat!")
-    print("="*70)
+    print("=" * 70)
     print("Powered by PydanticAI + Your Lambda API 🚀")
     print(f"\nConnected to: {API_BASE_URL}")
     print("\nI can help you explore your running data. Try asking:")
@@ -295,9 +295,7 @@ async def main():
 
             # Run the agent with streaming
             async with agent.run_stream(
-                user_input,
-                deps=deps,
-                message_history=conversation_history
+                user_input, deps=deps, message_history=conversation_history
             ) as result:
                 # Stream the response in real-time
                 async for text in result.stream():

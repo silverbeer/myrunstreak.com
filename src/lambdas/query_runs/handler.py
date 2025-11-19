@@ -1,9 +1,7 @@
 """Lambda function handler for querying running statistics."""
 
 import json
-import logging
 import os
-from datetime import date, timedelta
 from typing import Any
 
 from aws_lambda_powertools import Logger, Metrics
@@ -21,7 +19,7 @@ app = APIGatewayRestResolver()
 
 
 @app.get("/stats/overall")
-def get_overall_stats():
+def get_overall_stats() -> dict[str, Any]:
     """Get overall running statistics."""
     logger.info("Getting overall statistics")
 
@@ -45,7 +43,7 @@ def get_overall_stats():
                 "total_km": 0,
                 "avg_km": 0,
                 "longest_run_km": 0,
-                "avg_pace_min_per_km": 0
+                "avg_pace_min_per_km": 0,
             }
 
         return {
@@ -53,12 +51,12 @@ def get_overall_stats():
             "total_km": round(result[1], 2) if result[1] else 0,
             "avg_km": round(result[2], 2) if result[2] else 0,
             "longest_run_km": round(result[3], 2) if result[3] else 0,
-            "avg_pace_min_per_km": round(result[4], 2) if result[4] else 0
+            "avg_pace_min_per_km": round(result[4], 2) if result[4] else 0,
         }
 
 
 @app.get("/runs/recent")
-def get_recent_runs():
+def get_recent_runs() -> dict[str, Any]:
     """Get recent runs."""
     # Get query parameter for limit (default 10, max 100)
     limit = min(int(app.current_event.get_query_string_value("limit", "10")), 100)
@@ -86,26 +84,25 @@ def get_recent_runs():
 
         runs = []
         for row in results:
-            runs.append({
-                "activity_id": row[0],
-                "date": str(row[1]),
-                "distance_km": round(row[2], 2) if row[2] else 0,
-                "duration_seconds": row[3],
-                "duration_minutes": round(row[3] / 60, 1) if row[3] else 0,
-                "avg_pace_min_per_km": round(row[4], 2) if row[4] else 0,
-                "heart_rate_avg": row[5],
-                "temperature_celsius": row[6],
-                "weather": row[7]
-            })
+            runs.append(
+                {
+                    "activity_id": row[0],
+                    "date": str(row[1]),
+                    "distance_km": round(row[2], 2) if row[2] else 0,
+                    "duration_seconds": row[3],
+                    "duration_minutes": round(row[3] / 60, 1) if row[3] else 0,
+                    "avg_pace_min_per_km": round(row[4], 2) if row[4] else 0,
+                    "heart_rate_avg": row[5],
+                    "temperature_celsius": row[6],
+                    "weather": row[7],
+                }
+            )
 
-        return {
-            "count": len(runs),
-            "runs": runs
-        }
+        return {"count": len(runs), "runs": runs}
 
 
 @app.get("/stats/monthly")
-def get_monthly_stats():
+def get_monthly_stats() -> dict[str, Any]:
     """Get monthly statistics."""
     # Get query parameter for limit (default 12 months)
     limit = min(int(app.current_event.get_query_string_value("limit", "12")), 60)
@@ -131,22 +128,21 @@ def get_monthly_stats():
 
         months = []
         for row in results:
-            months.append({
-                "month": str(row[0]),
-                "run_count": row[1],
-                "total_km": round(row[2], 2) if row[2] else 0,
-                "avg_km": round(row[3], 2) if row[3] else 0,
-                "avg_pace_min_per_km": round(row[4], 2) if row[4] else 0
-            })
+            months.append(
+                {
+                    "month": str(row[0]),
+                    "run_count": row[1],
+                    "total_km": round(row[2], 2) if row[2] else 0,
+                    "avg_km": round(row[3], 2) if row[3] else 0,
+                    "avg_pace_min_per_km": round(row[4], 2) if row[4] else 0,
+                }
+            )
 
-        return {
-            "count": len(months),
-            "months": months
-        }
+        return {"count": len(months), "months": months}
 
 
 @app.get("/stats/streaks")
-def get_streaks():
+def get_streaks() -> dict[str, Any]:
     """Get running streak analysis."""
     logger.info("Calculating running streaks")
 
@@ -189,12 +185,14 @@ def get_streaks():
 
         streaks = []
         for row in results:
-            streaks.append({
-                "start_date": str(row[0]),
-                "end_date": str(row[1]),
-                "length_days": row[2],
-                "is_current": row[3]
-            })
+            streaks.append(
+                {
+                    "start_date": str(row[0]),
+                    "end_date": str(row[1]),
+                    "length_days": row[2],
+                    "is_current": row[3],
+                }
+            )
 
         # Find current streak
         current_streak = next((s for s in streaks if s["is_current"]), None)
@@ -202,12 +200,12 @@ def get_streaks():
         return {
             "current_streak": current_streak["length_days"] if current_streak else 0,
             "longest_streak": streaks[0]["length_days"] if streaks else 0,
-            "top_streaks": streaks
+            "top_streaks": streaks,
         }
 
 
 @app.get("/stats/records")
-def get_records():
+def get_records() -> dict[str, Any]:
     """Get personal records."""
     logger.info("Getting personal records")
 
@@ -269,7 +267,7 @@ def get_records():
             records["longest_run"] = {
                 "date": str(longest[0]),
                 "distance_km": round(longest[1], 2),
-                "activity_id": longest[2]
+                "activity_id": longest[2],
             }
 
         if fastest:
@@ -277,27 +275,27 @@ def get_records():
                 "date": str(fastest[0]),
                 "pace_min_per_km": round(fastest[1], 2),
                 "distance_km": round(fastest[2], 2),
-                "activity_id": fastest[3]
+                "activity_id": fastest[3],
             }
 
         if weekly:
             records["most_km_week"] = {
                 "week_start": str(weekly[0]),
-                "total_km": round(weekly[1], 2)
+                "total_km": round(weekly[1], 2),
             }
 
         if monthly:
             records["most_km_month"] = {
                 "month": str(monthly[0]),
                 "run_count": monthly[1],
-                "total_km": round(monthly[2], 2)
+                "total_km": round(monthly[2], 2),
             }
 
         return records
 
 
 @app.get("/runs")
-def list_runs():
+def list_runs() -> dict[str, Any]:
     """List all runs with pagination."""
     # Get query parameters
     offset = int(app.current_event.get_query_string_value("offset", "0"))
@@ -310,7 +308,8 @@ def list_runs():
 
     with db_manager as conn:
         # Get total count
-        total = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        total_result = conn.execute("SELECT COUNT(*) FROM runs").fetchone()
+        total = total_result[0] if total_result else 0
 
         # Get paginated results
         results = conn.execute(f"""
@@ -328,21 +327,17 @@ def list_runs():
 
         runs = []
         for row in results:
-            runs.append({
-                "activity_id": row[0],
-                "date": str(row[1]),
-                "distance_km": round(row[2], 2) if row[2] else 0,
-                "duration_minutes": round(row[3] / 60, 1) if row[3] else 0,
-                "avg_pace_min_per_km": round(row[4], 2) if row[4] else 0
-            })
+            runs.append(
+                {
+                    "activity_id": row[0],
+                    "date": str(row[1]),
+                    "distance_km": round(row[2], 2) if row[2] else 0,
+                    "duration_minutes": round(row[3] / 60, 1) if row[3] else 0,
+                    "avg_pace_min_per_km": round(row[4], 2) if row[4] else 0,
+                }
+            )
 
-        return {
-            "total": total,
-            "offset": offset,
-            "limit": limit,
-            "count": len(runs),
-            "runs": runs
-        }
+        return {"total": total, "offset": offset, "limit": limit, "count": len(runs), "runs": runs}
 
 
 @logger.inject_lambda_context
@@ -360,8 +355,5 @@ def lambda_handler(event: dict[str, Any], context: LambdaContext) -> dict[str, A
         return {
             "statusCode": 500,
             "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({
-                "error": "Internal server error",
-                "message": str(e)
-            })
+            "body": json.dumps({"error": "Internal server error", "message": str(e)}),
         }

@@ -13,11 +13,12 @@
 # What it does:
 # 1. Check out code
 # 2. Set up Python and UV
-# 3. Install dependencies
-# 4. Package Lambda function (code + dependencies)
-# 5. Create deployment ZIP
-# 6. Update Lambda function code
-# 7. Run smoke tests
+# 3. Run code quality checks (linting, type checking, tests)
+# 4. Install dependencies
+# 5. Package Lambda function (code + dependencies)
+# 6. Create deployment ZIP
+# 7. Update Lambda function code
+# 8. Run smoke tests
 #
 # Why separate from Terraform?
 # - Code changes are frequent
@@ -26,6 +27,7 @@
 # - Can roll back code without touching infrastructure
 #
 # Learning Points:
+# - Code quality gates (Ruff, Mypy, pytest) before deployment
 # - Lambda packaging with dependencies
 # - UV for Python package management
 # - AWS Lambda update-function-code API
@@ -105,7 +107,32 @@ jobs:
         run: uv --version
 
       # ========================================================================
-      # Step 4: Create Lambda Package Directory
+      # Step 4: Run Code Quality Checks
+      # ========================================================================
+      # Ensure code passes linting, type checking, and tests before deploying
+
+      - name: Install Dev Dependencies
+        run: |
+          # Install all dependencies including dev tools (ruff, mypy, pytest)
+          uv sync --all-extras
+
+      - name: Run Ruff Linting
+        run: |
+          uv run ruff check .
+          echo "✅ Ruff linting passed"
+
+      - name: Run Mypy Type Checking
+        run: |
+          uv run mypy src/
+          echo "✅ Mypy type checking passed"
+
+      - name: Run Tests
+        run: |
+          uv run pytest
+          echo "✅ All tests passed"
+
+      # ========================================================================
+      # Step 5: Create Lambda Package Directory
       # ========================================================================
       # Lambda needs code + dependencies in a flat structure
 
@@ -113,7 +140,7 @@ jobs:
         run: mkdir -p lambda-package
 
       # ========================================================================
-      # Step 5: Install Dependencies
+      # Step 6: Install Dependencies
       # ========================================================================
       # Install production dependencies (not dev dependencies)
 
@@ -124,7 +151,7 @@ jobs:
           uv pip install --target lambda-package --no-cache .
 
       # ========================================================================
-      # Step 6: Copy Application Code
+      # Step 7: Copy Application Code
       # ========================================================================
       # Copy src/ directory to package
 
@@ -134,7 +161,7 @@ jobs:
           # Lambda handler should be at root: lambda_function.py
 
       # ========================================================================
-      # Step 7: Create Lambda Handler
+      # Step 8: Create Lambda Handler
       # ========================================================================
       # Create lambda_function.py that imports from src/
 
@@ -153,7 +180,7 @@ jobs:
           EOF
 
       # ========================================================================
-      # Step 8: Remove Unnecessary Files
+      # Step 9: Remove Unnecessary Files
       # ========================================================================
       # Reduce package size by removing unneeded files
 
@@ -174,7 +201,7 @@ jobs:
           # find . -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
 
       # ========================================================================
-      # Step 9: Create Deployment ZIP
+      # Step 10: Create Deployment ZIP
       # ========================================================================
       - name: Create Deployment Package
         run: |
@@ -192,7 +219,7 @@ jobs:
           fi
 
       # ========================================================================
-      # Step 10: Configure AWS Credentials
+      # Step 11: Configure AWS Credentials
       # ========================================================================
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -201,7 +228,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       # ========================================================================
-      # Step 11: Deploy to Lambda
+      # Step 12: Deploy to Lambda
       # ========================================================================
       - name: Deploy to AWS Lambda
         id: deploy
@@ -219,7 +246,7 @@ jobs:
           echo "✅ Lambda function updated successfully"
 
       # ========================================================================
-      # Step 12: Get Function Info
+      # Step 13: Get Function Info
       # ========================================================================
       - name: Get Function Info
         id: function-info
@@ -236,7 +263,7 @@ jobs:
           echo "size=$SIZE" >> $GITHUB_OUTPUT
 
       # ========================================================================
-      # Step 13: Run Smoke Test
+      # Step 14: Run Smoke Test
       # ========================================================================
       # Invoke Lambda to verify it works
 
@@ -261,7 +288,7 @@ jobs:
           cat response.json
 
       # ========================================================================
-      # Step 14: Upload Deployment Artifact
+      # Step 15: Upload Deployment Artifact
       # ========================================================================
       # Save ZIP file as GitHub artifact for debugging/rollback
 
@@ -273,7 +300,7 @@ jobs:
           retention-days: 30
 
       # ========================================================================
-      # Step 15: Create Deployment Summary
+      # Step 16: Create Deployment Summary
       # ========================================================================
       - name: Create Deployment Summary
         if: steps.deploy.outcome == 'success'

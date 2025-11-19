@@ -13,18 +13,20 @@ import os
 import sys
 
 # Add src to path so we can import our modules
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from dotenv import load_dotenv
+
 from shared.smashrun.oauth import SmashRunOAuthClient
+
 
 def main():
     # Load environment variables
     load_dotenv()
 
-    client_id = os.getenv('SMASHRUN_CLIENT_ID')
-    client_secret = os.getenv('SMASHRUN_CLIENT_SECRET')
-    redirect_uri = os.getenv('SMASHRUN_REDIRECT_URI', 'urn:ietf:wg:oauth:2.0:oob')
+    client_id = os.getenv("SMASHRUN_CLIENT_ID")
+    client_secret = os.getenv("SMASHRUN_CLIENT_SECRET")
+    redirect_uri = os.getenv("SMASHRUN_REDIRECT_URI", "urn:ietf:wg:oauth:2.0:oob")
 
     if not client_id or not client_secret:
         print("❌ Error: SMASHRUN_CLIENT_ID and SMASHRUN_CLIENT_SECRET must be set in .env")
@@ -43,9 +45,7 @@ def main():
 
     # Initialize OAuth client
     oauth = SmashRunOAuthClient(
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri
+        client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri
     )
 
     # Step 1: Get authorization URL
@@ -74,9 +74,9 @@ def main():
     try:
         token_data = oauth.exchange_code_for_token(auth_code)
 
-        access_token = token_data.get('access_token')
-        refresh_token = token_data.get('refresh_token')
-        expires_in = token_data.get('expires_in', 'unknown')
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in", "unknown")
 
         if not access_token or not refresh_token:
             print("❌ Error: Failed to get tokens from SmashRun")
@@ -100,12 +100,12 @@ def main():
         print("🔐 Next Steps:")
         print()
         print("1. Update terraform.tfvars (local):")
-        print(f"   smashrun_access_token  = \"{access_token}\"")
-        print(f"   smashrun_refresh_token = \"{refresh_token}\"")
+        print(f'   smashrun_access_token  = "{access_token}"')
+        print(f'   smashrun_refresh_token = "{refresh_token}"')
         print()
         print("2. Update GitHub Secrets (for CI/CD):")
-        print(f"   gh secret set SMASHRUN_ACCESS_TOKEN --body \"{access_token}\"")
-        print(f"   gh secret set SMASHRUN_REFRESH_TOKEN --body \"{refresh_token}\"")
+        print(f'   gh secret set SMASHRUN_ACCESS_TOKEN --body "{access_token}"')
+        print(f'   gh secret set SMASHRUN_REFRESH_TOKEN --body "{refresh_token}"')
         print()
         print("3. Or run the update script:")
         print("   ./scripts/update_oauth_secrets.sh")
@@ -113,17 +113,19 @@ def main():
 
         # Optionally save to a temporary file
         save = input("💾 Save tokens to temp file? (y/N): ").strip().lower()
-        if save == 'y':
-            with open('/tmp/smashrun_tokens.txt', 'w') as f:
+        if save == "y":
+            with open("/tmp/smashrun_tokens.txt", "w") as f:
                 f.write(f"SMASHRUN_ACCESS_TOKEN={access_token}\n")
                 f.write(f"SMASHRUN_REFRESH_TOKEN={refresh_token}\n")
-            print(f"✅ Tokens saved to: /tmp/smashrun_tokens.txt")
+            print("✅ Tokens saved to: /tmp/smashrun_tokens.txt")
 
     except Exception as e:
         print(f"❌ Error getting tokens: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

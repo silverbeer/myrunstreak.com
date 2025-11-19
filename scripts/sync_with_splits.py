@@ -8,16 +8,14 @@ Usage:
 
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
-from src.shared.config import get_settings
 from src.shared.duckdb_ops import DuckDBManager, RunRepository
 from src.shared.smashrun import SmashRunAPIClient
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -63,8 +61,7 @@ def main():
 
         # Filter to only October
         october_activities = [
-            act for act in activities
-            if act.get("startDateTimeLocal", "").startswith("2025-10")
+            act for act in activities if act.get("startDateTimeLocal", "").startswith("2025-10")
         ]
         logger.info(f"Filtered to {len(october_activities)} October activities")
 
@@ -91,7 +88,7 @@ def main():
                         splits_synced += len(splits)
                         logger.info(f"  Stored {len(splits)} mile splits")
                     else:
-                        logger.info(f"  No splits data available")
+                        logger.info("  No splits data available")
 
                     logger.info(
                         f"✓ Synced: {activity.start_date_time_local.date()} - "

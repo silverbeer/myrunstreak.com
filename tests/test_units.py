@@ -1,6 +1,6 @@
 """Tests for unit conversion utilities."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -73,7 +73,7 @@ def test_activity_imperial_properties():
     # Create a 5K run in 30 minutes (stored in km)
     activity = Activity(
         activityId="test-imperial",
-        startDateTimeLocal=datetime.now(timezone.utc),
+        startDateTimeLocal=datetime.now(UTC),
         distance=5.0,  # 5 km
         duration=1800,  # 30 minutes
     )
@@ -106,7 +106,7 @@ def test_activity_imperial_realistic_example():
 
     activity = Activity(
         activityId="test-10k",
-        startDateTimeLocal=datetime.now(timezone.utc),
+        startDateTimeLocal=datetime.now(UTC),
         distance=distance_km,  # Store as km
         duration=duration_seconds,
     )
@@ -119,7 +119,7 @@ def test_activity_imperial_realistic_example():
     assert activity.average_pace_min_per_mile == pytest.approx(expected_pace, rel=0.01)
 
     # Speed: 6.2 miles in 52 min = 7.15 mph
-    expected_speed = (6.2 / (52 / 60))
+    expected_speed = 6.2 / (52 / 60)
     assert activity.average_speed_mph == pytest.approx(expected_speed, rel=0.01)
 
 
@@ -127,7 +127,7 @@ def test_zero_distance_handling():
     """Test that zero distance doesn't cause division errors."""
     activity = Activity(
         activityId="test-zero",
-        startDateTimeLocal=datetime.now(timezone.utc),
+        startDateTimeLocal=datetime.now(UTC),
         distance=0.001,  # Minimal valid distance
         duration=1,
     )
