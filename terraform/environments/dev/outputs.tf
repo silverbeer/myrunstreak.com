@@ -70,6 +70,29 @@ output "lambda_log_group_name" {
 }
 
 # ==============================================================================
+# ECR Outputs
+# ==============================================================================
+
+output "ecr_sync_repository_url" {
+  description = "URL of the sync Lambda ECR repository"
+  value       = module.ecr.sync_repository_url
+}
+
+output "ecr_query_repository_url" {
+  description = "URL of the query Lambda ECR repository"
+  value       = module.ecr.query_repository_url
+}
+
+# ==============================================================================
+# GitHub OIDC Outputs
+# ==============================================================================
+
+output "github_actions_role_arn" {
+  description = "ARN of the GitHub Actions deploy role (set this as AWS_LAMBDA_DEPLOY_ROLE_ARN secret in GitHub)"
+  value       = module.github_oidc.deploy_role_arn
+}
+
+# ==============================================================================
 # API Gateway Outputs
 # ==============================================================================
 

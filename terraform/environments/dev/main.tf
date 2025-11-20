@@ -119,6 +119,44 @@ module "secrets" {
 }
 
 # ==============================================================================
+# Module: ECR Repositories
+# ==============================================================================
+# Container registries for Lambda function images
+
+module "ecr" {
+  source = "../../modules/ecr"
+
+  project_name = local.project_name
+  environment  = var.environment
+  account_id   = data.aws_caller_identity.current.account_id
+
+  # Keep last 10 images to allow rollback
+  image_retention_count = 10
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
+# Module: GitHub OIDC Authentication
+# ==============================================================================
+# Secure CI/CD authentication without long-lived credentials
+
+module "github_oidc" {
+  source = "../../modules/github_oidc"
+
+  project_name = local.project_name
+  environment  = var.environment
+  account_id   = data.aws_caller_identity.current.account_id
+  aws_region   = data.aws_region.current.name
+
+  # GitHub repository configuration
+  github_org  = var.github_org
+  github_repo = var.github_repo
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
 # Module: Lambda Function
 # ==============================================================================
 # Serverless sync function that runs on schedule or via API
@@ -126,15 +164,12 @@ module "secrets" {
 module "lambda" {
   source = "../../modules/lambda"
 
-  function_name       = "${local.project_name}-sync-runner-${var.environment}"
-  execution_role_arn  = module.iam.lambda_execution_role_arn
+  function_name      = "${local.project_name}-sync-runner-${var.environment}"
+  execution_role_arn = module.iam.lambda_execution_role_arn
 
-  # Code package - use S3 for CI/CD, local file for development
-  package_path      = var.lambda_package_path
-  s3_package_bucket = var.lambda_s3_bucket != null ? var.lambda_s3_bucket : module.s3.bucket_id
-  s3_package_key    = var.lambda_s3_bucket != null ? var.lambda_s3_key_sync : null
-
-  handler           = "lambda_function.handler"
+  # Container-based deployment (solves Pydantic compatibility issues)
+  package_type = "Image"
+  image_uri    = "${module.ecr.sync_repository_url}:latest"
 
   # Environment configuration
   environment = var.environment
@@ -175,7 +210,8 @@ module "lambda" {
   depends_on = [
     module.iam,
     module.s3,
-    module.secrets
+    module.secrets,
+    module.ecr
   ]
 }
 
@@ -190,12 +226,9 @@ module "lambda_query" {
   function_name      = "${local.project_name}-query-runner-${var.environment}"
   execution_role_arn = module.iam.lambda_execution_role_arn
 
-  # Code package - use S3 for CI/CD, local file for development
-  package_path      = var.lambda_package_path
-  s3_package_bucket = var.lambda_s3_bucket != null ? var.lambda_s3_bucket : module.s3.bucket_id
-  s3_package_key    = var.lambda_s3_bucket != null ? var.lambda_s3_key_query : null
-
-  handler            = "lambda_function.handler"  # Will be overridden by GitHub Actions
+  # Container-based deployment (solves Pydantic compatibility issues)
+  package_type = "Image"
+  image_uri    = "${module.ecr.query_repository_url}:latest"
 
   # Environment configuration
   environment = var.environment
@@ -232,7 +265,8 @@ module "lambda_query" {
 
   depends_on = [
     module.iam,
-    module.s3
+    module.s3,
+    module.ecr
   ]
 }
 

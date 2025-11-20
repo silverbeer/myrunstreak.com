@@ -1,9 +1,8 @@
 # ==============================================================================
-# GitHub Actions Workflow - Lambda Function Deployment
+# GitHub Actions Workflow - Lambda Container Deployment
 # ==============================================================================
-# This workflow packages and deploys Lambda function code.
-# Separate from Terraform because code changes happen more frequently than
-# infrastructure changes.
+# This workflow builds and deploys Lambda functions as container images.
+# Uses ECR for container registry and solves Pydantic compatibility issues.
 #
 # Triggers:
 # - Push to main branch (when PR is merged)
@@ -12,26 +11,18 @@
 #
 # What it does:
 # 1. Check out code
-# 2. Set up Python and UV
-# 3. Run code quality checks (linting, type checking, tests)
-# 4. Install dependencies
-# 5. Package Lambda function (code + dependencies)
-# 6. Create deployment ZIP
-# 7. Update Lambda function code
-# 8. Run smoke tests
+# 2. Run code quality checks (linting, type checking, tests)
+# 3. Log in to Amazon ECR
+# 4. Build Docker images for each Lambda
+# 5. Push images to ECR
+# 6. Update Lambda functions to use new images
+# 7. Run smoke tests
 #
-# Why separate from Terraform?
-# - Code changes are frequent
-# - Infrastructure changes are rare
-# - Faster deployment (no Terraform plan/apply)
-# - Can roll back code without touching infrastructure
-#
-# Learning Points:
-# - Code quality gates (Ruff, Mypy, pytest) before deployment
-# - Lambda packaging with dependencies
-# - UV for Python package management
-# - AWS Lambda update-function-code API
-# - Deployment verification
+# Benefits of container deployment:
+# - Full control over Python environment
+# - No Pydantic/compiled extension compatibility issues
+# - Reproducible builds
+# - Larger size limit (10 GB vs 250 MB)
 # ==============================================================================
 
 name: "Deploy Lambda Function"
@@ -45,6 +36,7 @@ on:
       - "src/**"
       - "pyproject.toml"
       - "uv.lock"
+      - "Dockerfile"
       - ".github/workflows/lambda-deploy.yml"
 
   # Allow manual trigger
@@ -59,27 +51,67 @@ permissions:
 env:
   AWS_REGION: us-east-2
   PYTHON_VERSION: "3.12"
-  LAMBDA_S3_BUCKET: myrunstreak-data-dev-855323747881
+  AWS_ACCOUNT_ID: "855323747881"
 
 jobs:
+  # ==========================================================================
+  # Job 1: Code Quality Checks
+  # ==========================================================================
+  code-quality:
+    name: "Code Quality"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install UV
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install Dev Dependencies
+        run: uv sync --all-extras
+
+      - name: Run Ruff Linting
+        run: |
+          uv run ruff check .
+          echo "✅ Ruff linting passed"
+
+      - name: Run Mypy Type Checking
+        run: |
+          uv run mypy src/lambdas src/shared
+          echo "✅ Mypy type checking passed"
+
+      - name: Run Tests
+        run: |
+          uv run pytest
+          echo "✅ All tests passed"
+
+  # ==========================================================================
+  # Job 2: Build and Deploy Lambda Containers
+  # ==========================================================================
   deploy-lambda:
     name: "Deploy ${{ matrix.lambda.name }}"
     runs-on: ubuntu-latest
+    needs: code-quality
 
-    # Deploy both sync and query Lambda functions
     strategy:
       matrix:
         lambda:
           - name: "Sync Lambda"
             function_name: myrunstreak-sync-runner-dev
             handler_module: sync_runs
-            handler_import: "from src.lambdas.sync_runs.handler import lambda_handler"
-            s3_key: "lambda-packages/sync-runner/latest.zip"
+            ecr_repository: myrunstreak-sync-dev
           - name: "Query Lambda"
             function_name: myrunstreak-query-runner-dev
             handler_module: query_runs
-            handler_import: "from src.lambdas.query_runs.handler import lambda_handler"
-            s3_key: "lambda-packages/query-runner/latest.zip"
+            ecr_repository: myrunstreak-query-dev
 
     steps:
       # ========================================================================
@@ -89,142 +121,7 @@ jobs:
         uses: actions/checkout@v4
 
       # ========================================================================
-      # Step 2: Set up Python
-      # ========================================================================
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      # ========================================================================
-      # Step 3: Install UV
-      # ========================================================================
-      # UV is our exclusive Python package manager (faster than pip)
-
-      - name: Install UV
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Verify UV Installation
-        run: uv --version
-
-      # ========================================================================
-      # Step 4: Run Code Quality Checks
-      # ========================================================================
-      # Ensure code passes linting, type checking, and tests before deploying
-
-      - name: Install Dev Dependencies
-        run: |
-          # Install all dependencies including dev tools (ruff, mypy, pytest)
-          uv sync --all-extras
-
-      - name: Run Ruff Linting
-        run: |
-          uv run ruff check .
-          echo "✅ Ruff linting passed"
-
-      - name: Run Mypy Type Checking
-        run: |
-          # Only check lambdas and shared modules (skip cli to avoid duplicate module issues)
-          uv run mypy src/lambdas src/shared
-          echo "✅ Mypy type checking passed"
-
-      - name: Run Tests
-        run: |
-          uv run pytest
-          echo "✅ All tests passed"
-
-      # ========================================================================
-      # Step 5: Create Lambda Package Directory
-      # ========================================================================
-      # Lambda needs code + dependencies in a flat structure
-
-      - name: Create Package Directory
-        run: mkdir -p lambda-package
-
-      # ========================================================================
-      # Step 6: Install Dependencies
-      # ========================================================================
-      # Install production dependencies (not dev dependencies)
-
-      - name: Install Dependencies
-        run: |
-          # Install production dependencies to lambda-package directory
-          # This installs only the dependencies defined in pyproject.toml (not dev dependencies)
-          # Use --python-platform to get binaries compatible with AWS Lambda (Amazon Linux 2)
-          uv pip install --target lambda-package --no-cache --python-platform x86_64-manylinux2014 .
-
-      # ========================================================================
-      # Step 7: Copy Application Code
-      # ========================================================================
-      # Copy src/ directory to package
-
-      - name: Copy Application Code
-        run: |
-          cp -r src lambda-package/
-          # Lambda handler should be at root: lambda_function.py
-
-      # ========================================================================
-      # Step 8: Create Lambda Handler
-      # ========================================================================
-      # Create lambda_function.py that imports from src/
-
-      - name: Create Lambda Handler
-        run: |
-          cat > lambda-package/lambda_function.py <<'EOF'
-          """
-          AWS Lambda entry point for MyRunStreak.com ${{ matrix.lambda.handler_module }} function.
-
-          This handler imports the real logic from src/lambdas/${{ matrix.lambda.handler_module }}/handler.py
-          """
-          ${{ matrix.lambda.handler_import }}
-
-          # Re-export the handler function for Lambda to invoke
-          handler = lambda_handler
-          EOF
-
-      # ========================================================================
-      # Step 9: Remove Unnecessary Files
-      # ========================================================================
-      # Reduce package size by removing unneeded files
-
-      - name: Clean Up Package
-        run: |
-          cd lambda-package
-
-          # Remove __pycache__ directories
-          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-
-          # Remove .pyc files
-          find . -type f -name "*.pyc" -delete
-
-          # Remove tests if any
-          rm -rf tests/ test_*.py
-
-          # Keep .dist-info directories - some packages like DuckDB need their metadata
-          # find . -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
-
-      # ========================================================================
-      # Step 10: Create Deployment ZIP
-      # ========================================================================
-      - name: Create Deployment Package
-        run: |
-          cd lambda-package
-          zip -r ../deployment-package.zip . -q
-          cd ..
-
-          # Show package size
-          ls -lh deployment-package.zip
-
-          # Warn if package is too large (Lambda limit is 50MB direct upload, 250MB unzipped)
-          SIZE=$(stat -f%z deployment-package.zip 2>/dev/null || stat -c%s deployment-package.zip)
-          if [ $SIZE -gt 52428800 ]; then
-            echo "⚠️ Package size exceeds 50MB. Consider using Lambda layers or S3."
-          fi
-
-      # ========================================================================
-      # Step 11: Configure AWS Credentials
+      # Step 2: Configure AWS Credentials
       # ========================================================================
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -233,29 +130,45 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       # ========================================================================
-      # Step 12: Upload to S3
+      # Step 3: Login to Amazon ECR
       # ========================================================================
-      # Store package in S3 for Terraform and Lambda deployment
-      - name: Upload Package to S3
-        run: |
-          # Upload deployment package to S3
-          aws s3 cp deployment-package.zip \
-            s3://${{ env.LAMBDA_S3_BUCKET }}/${{ matrix.lambda.s3_key }}
-
-          echo "✅ Package uploaded to s3://${{ env.LAMBDA_S3_BUCKET }}/${{ matrix.lambda.s3_key }}"
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       # ========================================================================
-      # Step 13: Deploy to Lambda
+      # Step 4: Set up Docker Buildx
       # ========================================================================
-      - name: Deploy to AWS Lambda
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ========================================================================
+      # Step 5: Build and Push Docker Image
+      # ========================================================================
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ matrix.lambda.ecr_repository }}:latest
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ matrix.lambda.ecr_repository }}:${{ github.sha }}
+          build-args: |
+            HANDLER_MODULE=${{ matrix.lambda.handler_module }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ========================================================================
+      # Step 6: Update Lambda Function
+      # ========================================================================
+      - name: Update Lambda function
         id: deploy
         run: |
-          # Update Lambda function code from S3
+          # Update Lambda to use new image
           aws lambda update-function-code \
             --function-name ${{ matrix.lambda.function_name }} \
-            --s3-bucket ${{ env.LAMBDA_S3_BUCKET }} \
-            --s3-key ${{ matrix.lambda.s3_key }} \
-            --publish
+            --image-uri ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ matrix.lambda.ecr_repository }}:${{ github.sha }}
 
           # Wait for update to complete
           aws lambda wait function-updated \
@@ -264,38 +177,32 @@ jobs:
           echo "✅ Lambda function updated successfully"
 
       # ========================================================================
-      # Step 14: Get Function Info
+      # Step 7: Get Function Info
       # ========================================================================
       - name: Get Function Info
         id: function-info
         run: |
-          # Get function configuration
           CONFIG=$(aws lambda get-function-configuration \
             --function-name ${{ matrix.lambda.function_name }})
 
-          # Extract version and size
           VERSION=$(echo $CONFIG | jq -r '.Version')
-          SIZE=$(echo $CONFIG | jq -r '.CodeSize')
+          CODE_SIZE=$(echo $CONFIG | jq -r '.CodeSize')
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "size=$SIZE" >> $GITHUB_OUTPUT
+          echo "code_size=$CODE_SIZE" >> $GITHUB_OUTPUT
 
       # ========================================================================
-      # Step 15: Run Smoke Test
+      # Step 8: Run Smoke Test
       # ========================================================================
-      # Invoke Lambda to verify it works
-
       - name: Smoke Test
         id: test
         run: |
-          # Invoke Lambda with test event
           RESULT=$(aws lambda invoke \
             --function-name ${{ matrix.lambda.function_name }} \
             --payload '{"source":"github-actions","action":"smoke-test"}' \
             --cli-binary-format raw-in-base64-out \
             response.json)
 
-          # Check for errors
           if echo $RESULT | jq -e '.FunctionError' > /dev/null; then
             echo "❌ Lambda invocation failed"
             cat response.json
@@ -306,30 +213,17 @@ jobs:
           cat response.json
 
       # ========================================================================
-      # Step 16: Upload Deployment Artifact
-      # ========================================================================
-      # Save ZIP file as GitHub artifact for debugging/rollback
-
-      - name: Upload Deployment Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lambda-deployment-package-${{ matrix.lambda.handler_module }}
-          path: deployment-package.zip
-          retention-days: 30
-
-      # ========================================================================
-      # Step 17: Create Deployment Summary
+      # Step 9: Create Deployment Summary
       # ========================================================================
       - name: Create Deployment Summary
         if: steps.deploy.outcome == 'success'
         run: |
           cat >> $GITHUB_STEP_SUMMARY <<EOF
-          ## 🚀 ${{ matrix.lambda.name }} Deployed
+          ## 🚀 ${{ matrix.lambda.name }} Deployed (Container)
 
           **Function:** \`${{ matrix.lambda.function_name }}\`
-          **Version:** \`${{ steps.function-info.outputs.version }}\`
-          **Package Size:** $((${{ steps.function-info.outputs.size }} / 1024)) KB
-          **S3 Package:** \`s3://${{ env.LAMBDA_S3_BUCKET }}/${{ matrix.lambda.s3_key }}\`
+          **Image:** \`${{ matrix.lambda.ecr_repository }}:${{ github.sha }}\`
+          **Code Size:** $((${{ steps.function-info.outputs.code_size }} / 1024 / 1024)) MB
           **Deployed At:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
           **Deployed By:** @${{ github.actor }}
 
@@ -344,6 +238,7 @@ jobs:
           ### 📊 AWS Console Links
 
           - [Lambda Function](https://console.aws.amazon.com/lambda/home?region=${{ env.AWS_REGION }}#/functions/${{ matrix.lambda.function_name }})
+          - [ECR Repository](https://console.aws.amazon.com/ecr/repositories/private/${{ env.AWS_ACCOUNT_ID }}/${{ matrix.lambda.ecr_repository }}?region=${{ env.AWS_REGION }})
           - [CloudWatch Logs](https://console.aws.amazon.com/cloudwatch/home?region=${{ env.AWS_REGION }}#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252F${{ matrix.lambda.function_name }})
 
           ---
