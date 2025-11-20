@@ -117,13 +117,28 @@ def sync_runs(
         since_date = date(2010, 1, 1)  # SmashRun launch date
         until_date = date.today()
         display.display_info("Full sync - this may take a while for 4000+ runs")
-    elif since:
-        try:
-            since_date = date.fromisoformat(since)
-        except ValueError:
-            display.display_error(f"Invalid date format: {since}. Use YYYY-MM-DD.")
-            raise typer.Exit(1) from None
-        until_date = date.fromisoformat(until) if until else date.today()
+    elif since or until:
+        # Parse since date
+        if since:
+            try:
+                since_date = date.fromisoformat(since)
+            except ValueError:
+                display.display_error(f"Invalid date format: {since}. Use YYYY-MM-DD.")
+                raise typer.Exit(1) from None
+        else:
+            since_date = get_last_sync_date()
+
+        # Parse until date
+        if until:
+            try:
+                until_date = date.fromisoformat(until)
+            except ValueError:
+                display.display_error(f"Invalid date format: {until}. Use YYYY-MM-DD.")
+                raise typer.Exit(1) from None
+        else:
+            until_date = date.today()
+
+        display.display_info(f"Syncing {since_date} to {until_date}")
     else:
         since_date = get_last_sync_date()
         until_date = date.today()
