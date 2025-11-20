@@ -126,6 +126,7 @@ class RunsRepository:
             .gte("start_date", start_date.isoformat())
             .lte("start_date", end_date.isoformat())
             .order("start_date_time_local", desc=True)
+            .limit(10000)  # Override PostgREST default of 1000
             .execute()
         )
 
@@ -145,10 +146,12 @@ class RunsRepository:
             Dict with total_runs, total_km, avg_km, longest_run_km, avg_pace
         """
         # Get all runs for user (we'll aggregate client-side)
+        # Note: PostgREST has a default limit of 1000, so we set a high limit
         result = (
             self.supabase.table("runs")
             .select("distance_km, average_pace_min_per_km")
             .eq("user_id", str(user_id))
+            .limit(10000)  # Override PostgREST default of 1000
             .execute()
         )
 
@@ -221,6 +224,7 @@ class RunsRepository:
             .select("start_date")
             .eq("user_id", str(user_id))
             .order("start_date", desc=True)
+            .limit(10000)  # Override PostgREST default of 1000
             .execute()
         )
 
