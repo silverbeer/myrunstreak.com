@@ -9,7 +9,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from supabase import Client, create_client
 
+from .config import find_env_file
+
 logger = logging.getLogger(__name__)
+
+# Find env file once at module load
+_env_file = find_env_file()
 
 
 class SupabaseSettings(BaseSettings):
@@ -22,7 +27,7 @@ class SupabaseSettings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_env_file,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
