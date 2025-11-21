@@ -65,21 +65,35 @@ resource "aws_lambda_function" "sync_runner" {
   # IAM Role
   role = var.execution_role_arn
 
-  # Code Package - supports either local file or S3
-  # Use S3 for CI/CD (GitHub Actions), local file for development
-  filename         = var.package_path != null ? var.package_path : null
-  source_code_hash = var.package_path != null ? filebase64sha256(var.package_path) : null
-  s3_bucket        = var.s3_package_bucket
-  s3_key           = var.s3_package_key
-  # Note: When using S3, code updates are triggered by changing s3_key
-  # Lambda workflow uploads new versions with unique keys
+  # Package Type - Zip or Image (container)
+  package_type = var.package_type
 
-  # Runtime Configuration
-  runtime = "python3.12"
-  handler = var.handler  # Format: "filename.function_name"
+  # Container Image Configuration (when package_type = "Image")
+  image_uri = var.package_type == "Image" ? var.image_uri : null
+
+  # ZIP Package Configuration (when package_type = "Zip")
+  # Supports either local file or S3
+  filename         = var.package_type == "Zip" && var.package_path != null ? var.package_path : null
+  source_code_hash = var.package_type == "Zip" && var.package_path != null ? filebase64sha256(var.package_path) : null
+  s3_bucket        = var.package_type == "Zip" ? var.s3_package_bucket : null
+  s3_key           = var.package_type == "Zip" ? var.s3_package_key : null
+
+  # Runtime Configuration (only for Zip packages - container defines these in Dockerfile)
+  runtime = var.package_type == "Zip" ? "python3.12" : null
+  handler = var.package_type == "Zip" ? var.handler : null
+  # Format: "filename.function_name"
   # Example: "lambda_function.handler" means:
   #   - File: lambda_function.py
   #   - Function: handler(event, context)
+
+  # Image configuration for container-based Lambda
+  dynamic "image_config" {
+    for_each = var.package_type == "Image" ? [1] : []
+    content {
+      command           = ["lambda_function.handler"]
+      working_directory = "/var/task"
+    }
+  }
 
   # Performance Configuration
   memory_size = var.memory_size  # 128-10240 MB
@@ -110,6 +124,9 @@ resource "aws_lambda_function" "sync_runner" {
 
         # Feature flags
         ENABLE_SPLITS = "true"
+
+        # Python path for container-based Lambda (required for src imports)
+        PYTHONPATH = "/var/task"
       },
       var.extra_environment_variables
     )

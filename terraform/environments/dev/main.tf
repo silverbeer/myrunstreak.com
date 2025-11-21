@@ -119,6 +119,44 @@ module "secrets" {
 }
 
 # ==============================================================================
+# Module: ECR Repositories
+# ==============================================================================
+# Container registries for Lambda function images
+
+module "ecr" {
+  source = "../../modules/ecr"
+
+  project_name = local.project_name
+  environment  = var.environment
+  account_id   = data.aws_caller_identity.current.account_id
+
+  # Keep last 10 images to allow rollback
+  image_retention_count = 10
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
+# Module: GitHub OIDC Authentication
+# ==============================================================================
+# Secure CI/CD authentication without long-lived credentials
+
+module "github_oidc" {
+  source = "../../modules/github_oidc"
+
+  project_name = local.project_name
+  environment  = var.environment
+  account_id   = data.aws_caller_identity.current.account_id
+  aws_region   = data.aws_region.current.name
+
+  # GitHub repository configuration
+  github_org  = var.github_org
+  github_repo = var.github_repo
+
+  tags = local.common_tags
+}
+
+# ==============================================================================
 # Module: Lambda Function
 # ==============================================================================
 # Serverless sync function that runs on schedule or via API
@@ -126,15 +164,12 @@ module "secrets" {
 module "lambda" {
   source = "../../modules/lambda"
 
-  function_name       = "${local.project_name}-sync-runner-${var.environment}"
-  execution_role_arn  = module.iam.lambda_execution_role_arn
+  function_name      = "${local.project_name}-sync-runner-${var.environment}"
+  execution_role_arn = module.iam.lambda_execution_role_arn
 
-  # Code package - use S3 for CI/CD, local file for development
-  package_path      = var.lambda_package_path
-  s3_package_bucket = var.lambda_s3_bucket != null ? var.lambda_s3_bucket : module.s3.bucket_id
-  s3_package_key    = var.lambda_s3_bucket != null ? var.lambda_s3_key_sync : null
-
-  handler           = "lambda_function.handler"
+  # Container-based deployment (solves Pydantic compatibility issues)
+  package_type = "Image"
+  image_uri    = "${module.ecr.sync_repository_url}:latest"
 
   # Environment configuration
   environment = var.environment
@@ -162,12 +197,9 @@ module "lambda" {
   eventbridge_rule_arn      = null
 
   # Additional environment variables needed by the sync handler
+  # Note: Secrets (Supabase, SmashRun credentials) are fetched from Secrets Manager
   extra_environment_variables = {
-    SMASHRUN_CLIENT_ID     = var.smashrun_client_id
-    SMASHRUN_CLIENT_SECRET = var.smashrun_client_secret
-    SMASHRUN_REDIRECT_URI  = "urn:ietf:wg:oauth:2.0:oob"  # Out-of-band redirect for CLI
-    SUPABASE_URL           = var.supabase_url
-    SUPABASE_KEY           = var.supabase_service_role_key
+    SMASHRUN_REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"  # Out-of-band redirect for CLI
   }
 
   tags = local.common_tags
@@ -175,7 +207,8 @@ module "lambda" {
   depends_on = [
     module.iam,
     module.s3,
-    module.secrets
+    module.secrets,
+    module.ecr
   ]
 }
 
@@ -190,12 +223,9 @@ module "lambda_query" {
   function_name      = "${local.project_name}-query-runner-${var.environment}"
   execution_role_arn = module.iam.lambda_execution_role_arn
 
-  # Code package - use S3 for CI/CD, local file for development
-  package_path      = var.lambda_package_path
-  s3_package_bucket = var.lambda_s3_bucket != null ? var.lambda_s3_bucket : module.s3.bucket_id
-  s3_package_key    = var.lambda_s3_bucket != null ? var.lambda_s3_key_query : null
-
-  handler            = "lambda_function.handler"  # Will be overridden by GitHub Actions
+  # Container-based deployment (solves Pydantic compatibility issues)
+  package_type = "Image"
+  image_uri    = "${module.ecr.query_repository_url}:latest"
 
   # Environment configuration
   environment = var.environment
@@ -223,16 +253,15 @@ module "lambda_query" {
   eventbridge_rule_arn      = null
 
   # Environment variables for query handler
-  extra_environment_variables = {
-    SUPABASE_URL = var.supabase_url
-    SUPABASE_KEY = var.supabase_service_role_key
-  }
+  # Note: Supabase credentials are fetched from Secrets Manager
+  extra_environment_variables = {}
 
   tags = local.common_tags
 
   depends_on = [
     module.iam,
-    module.s3
+    module.s3,
+    module.ecr
   ]
 }
 
@@ -435,6 +464,117 @@ resource "aws_api_gateway_integration" "runs_proxy" {
   uri                     = module.lambda_query.function_invoke_arn
 }
 
+# /sync resource for user-initiated sync via query Lambda
+resource "aws_api_gateway_resource" "sync_user" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = module.api_gateway.root_resource_id
+  path_part   = "sync-user"  # Different from /sync which goes to sync Lambda
+}
+
+# POST method for /sync-user
+resource "aws_api_gateway_method" "sync_user_post" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.sync_user.id
+  http_method   = "POST"
+  authorization = "NONE"  # Will use user_id for now
+}
+
+# Integration with query Lambda for /sync-user
+resource "aws_api_gateway_integration" "sync_user" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.sync_user.id
+  http_method = aws_api_gateway_method.sync_user_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.lambda_query.function_invoke_arn
+}
+
+# /auth resource for authentication endpoints
+resource "aws_api_gateway_resource" "auth" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = module.api_gateway.root_resource_id
+  path_part   = "auth"
+}
+
+# /auth/store-tokens resource
+resource "aws_api_gateway_resource" "auth_store_tokens" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = aws_api_gateway_resource.auth.id
+  path_part   = "store-tokens"
+}
+
+# POST method for /auth/store-tokens
+resource "aws_api_gateway_method" "auth_store_tokens_post" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.auth_store_tokens.id
+  http_method   = "POST"
+  authorization = "NONE"  # Will use user_id for now
+}
+
+# Integration with query Lambda for /auth/store-tokens
+resource "aws_api_gateway_integration" "auth_store_tokens" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.auth_store_tokens.id
+  http_method = aws_api_gateway_method.auth_store_tokens_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.lambda_query.function_invoke_arn
+}
+
+# /auth/login-url resource
+resource "aws_api_gateway_resource" "auth_login_url" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = aws_api_gateway_resource.auth.id
+  path_part   = "login-url"
+}
+
+# GET method for /auth/login-url
+resource "aws_api_gateway_method" "auth_login_url_get" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.auth_login_url.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+# Integration with query Lambda for /auth/login-url
+resource "aws_api_gateway_integration" "auth_login_url" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.auth_login_url.id
+  http_method = aws_api_gateway_method.auth_login_url_get.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.lambda_query.function_invoke_arn
+}
+
+# /auth/callback resource
+resource "aws_api_gateway_resource" "auth_callback" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = aws_api_gateway_resource.auth.id
+  path_part   = "callback"
+}
+
+# POST method for /auth/callback
+resource "aws_api_gateway_method" "auth_callback_post" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.auth_callback.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+# Integration with query Lambda for /auth/callback
+resource "aws_api_gateway_integration" "auth_callback" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.auth_callback.id
+  http_method = aws_api_gateway_method.auth_callback_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.lambda_query.function_invoke_arn
+}
+
 # ==============================================================================
 # API Gateway Deployment for Query Endpoints
 # ==============================================================================
@@ -457,6 +597,19 @@ resource "aws_api_gateway_deployment" "query_endpoints" {
       aws_api_gateway_resource.runs_proxy.id,
       aws_api_gateway_method.runs_proxy_get.id,
       aws_api_gateway_integration.runs_proxy.id,
+      aws_api_gateway_resource.sync_user.id,
+      aws_api_gateway_method.sync_user_post.id,
+      aws_api_gateway_integration.sync_user.id,
+      aws_api_gateway_resource.auth.id,
+      aws_api_gateway_resource.auth_store_tokens.id,
+      aws_api_gateway_method.auth_store_tokens_post.id,
+      aws_api_gateway_integration.auth_store_tokens.id,
+      aws_api_gateway_resource.auth_login_url.id,
+      aws_api_gateway_method.auth_login_url_get.id,
+      aws_api_gateway_integration.auth_login_url.id,
+      aws_api_gateway_resource.auth_callback.id,
+      aws_api_gateway_method.auth_callback_post.id,
+      aws_api_gateway_integration.auth_callback.id,
     ]))
   }
 
@@ -468,6 +621,10 @@ resource "aws_api_gateway_deployment" "query_endpoints" {
     aws_api_gateway_integration.stats_proxy,
     aws_api_gateway_integration.runs_get,
     aws_api_gateway_integration.runs_proxy,
+    aws_api_gateway_integration.sync_user,
+    aws_api_gateway_integration.auth_store_tokens,
+    aws_api_gateway_integration.auth_login_url,
+    aws_api_gateway_integration.auth_callback,
   ]
 }
 

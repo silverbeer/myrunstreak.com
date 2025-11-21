@@ -30,8 +30,26 @@ variable "s3_package_key" {
   default     = null
 }
 
+# Container Image Configuration
+variable "package_type" {
+  description = "Lambda deployment package type: 'Zip' or 'Image'"
+  type        = string
+  default     = "Zip"
+
+  validation {
+    condition     = contains(["Zip", "Image"], var.package_type)
+    error_message = "Package type must be 'Zip' or 'Image'."
+  }
+}
+
+variable "image_uri" {
+  description = "ECR image URI for container-based Lambda (required when package_type = 'Image')"
+  type        = string
+  default     = null
+}
+
 variable "handler" {
-  description = "Lambda function handler (format: filename.function_name)"
+  description = "Lambda function handler (format: filename.function_name) - ignored when package_type = 'Image'"
   type        = string
   default     = "lambda_function.handler"
 }

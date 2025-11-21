@@ -1,0 +1,71 @@
+# ==============================================================================
+# Docker Ignore File
+# ==============================================================================
+# Exclude files not needed in Lambda container images
+# This reduces build time and image size
+
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+env
+ENV
+.env
+.env.*
+
+# Testing
+tests/
+pytest_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Terraform
+terraform/
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# CI/CD
+.github/
+
+# Local development
+data/
+tmp/
+*.log
+*.duckdb
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Other
+.DS_Store
+Thumbs.db
+*.bak
+
+# Node (if any frontend assets)
+node_modules/

@@ -223,6 +223,43 @@ resource "aws_iam_role_policy" "cloudwatch_metrics" {
 # - Without condition, could publish to any namespace
 
 # ------------------------------------------------------------------------------
+# ECR Access Policy
+# ------------------------------------------------------------------------------
+# Lambda needs permission to pull container images from ECR
+
+resource "aws_iam_role_policy" "ecr_access" {
+  name = "ecr-pull-access"
+  role = aws_iam_role.lambda_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ECRGetAuthToken"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPullImages"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchCheckLayerAvailability"
+        ]
+        Resource = "arn:aws:ecr:${var.aws_region}:${var.account_id}:repository/${var.project_name}-*"
+      }
+    ]
+  })
+}
+
+# Note: Lambda service also needs repository-based permissions
+# which are configured in the ECR module's repository policy
+
+# ------------------------------------------------------------------------------
 # API Gateway Invocation Role (Optional)
 # ------------------------------------------------------------------------------
 # API Gateway needs permission to invoke Lambda

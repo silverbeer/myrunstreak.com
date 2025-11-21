@@ -5,6 +5,30 @@ from uuid import UUID
 
 from ..models import Activity, Split
 
+# Map SmashRun weather types to database enum values
+# Database: 'sunny', 'cloudy', 'rainy', 'snowy', 'windy', 'hot', 'cold'
+WEATHER_TYPE_MAP: dict[str, str | None] = {
+    "clear": "sunny",
+    "cloudy": "cloudy",
+    "partlycloudy": "cloudy",
+    "rain": "rainy",
+    "drizzle": "rainy",
+    "extremerain": "rainy",
+    "storm": "rainy",
+    "snow": "snowy",
+    "blizzard": "snowy",
+    "extremecold": "cold",
+    "extremewind": "windy",
+    "indoor": None,  # No outdoor weather for indoor runs
+}
+
+
+def map_weather_type(smashrun_weather: str | None) -> str | None:
+    """Map SmashRun weather type to database enum value."""
+    if not smashrun_weather:
+        return None
+    return WEATHER_TYPE_MAP.get(smashrun_weather, None)
+
 
 def activity_to_run_dict(activity: Activity, user_id: UUID, source_id: UUID) -> dict[str, Any]:
     """
@@ -20,33 +44,50 @@ def activity_to_run_dict(activity: Activity, user_id: UUID, source_id: UUID) -> 
     Returns:
         Dict ready for Supabase insert/upsert
     """
+    # Extract date from local time BEFORE any timezone conversion
+    # This ensures the date matches the user's local date, not UTC
+    local_dt = activity.start_date_time_local
+    start_date = local_dt.date().isoformat()
+
     return {
         # Multi-user identifiers
         "user_id": str(user_id),
         "source_id": str(source_id),
         "source_activity_id": activity.activity_id,  # Their API ID
         "external_id": activity.external_id,
-        # Temporal data (computed fields handled by trigger)
-        "start_date_time_local": activity.start_date_time_local.isoformat(),
+        # Temporal data - explicitly set date from local time
+        "start_date_time_local": local_dt.isoformat(),
+        "start_date": start_date,
+        "start_year": local_dt.year,
+        "start_month": local_dt.month,
+        "start_day_of_week": local_dt.weekday(),
         # Core metrics
         "distance_km": float(activity.distance),
         "duration_seconds": float(activity.duration),
-        # Cadence
-        "cadence_average": (float(activity.cadence_average) if activity.cadence_average else None),
-        "cadence_min": float(activity.cadence_min) if activity.cadence_min else None,
-        "cadence_max": float(activity.cadence_max) if activity.cadence_max else None,
-        # Heart rate
-        "heart_rate_average": activity.heart_rate_average,
-        "heart_rate_min": activity.heart_rate_min,
-        "heart_rate_max": activity.heart_rate_max,
-        # Health & subjective
+        # Cadence (cast to int - database expects integer)
+        "cadence_average": (int(activity.cadence_average) if activity.cadence_average else None),
+        "cadence_min": int(activity.cadence_min) if activity.cadence_min else None,
+        "cadence_max": int(activity.cadence_max) if activity.cadence_max else None,
+        # Heart rate (cast to int - database expects integer)
+        "heart_rate_average": int(activity.heart_rate_average) if activity.heart_rate_average else None,
+        "heart_rate_min": int(activity.heart_rate_min) if activity.heart_rate_min else None,
+        "heart_rate_max": int(activity.heart_rate_max) if activity.heart_rate_max else None,
+        # Health & subjective (filter "none" string values to NULL for enums)
         "body_weight_kg": (float(activity.body_weight) if activity.body_weight else None),
-        "how_felt": activity.how_felt.value if activity.how_felt else None,
+        "how_felt": (
+            activity.how_felt.value
+            if activity.how_felt and activity.how_felt.value != "none"
+            else None
+        ),
         # Environmental
-        "terrain": activity.terrain.value if activity.terrain else None,
+        "terrain": (
+            activity.terrain.value
+            if activity.terrain and activity.terrain.value != "none"
+            else None
+        ),
         "temperature_celsius": (float(activity.temperature) if activity.temperature else None),
-        "weather_type": (activity.weather_type.value if activity.weather_type else None),
-        "humidity_percent": activity.humidity,
+        "weather_type": map_weather_type(activity.weather_type.value if activity.weather_type else None),
+        "humidity_percent": int(activity.humidity) if activity.humidity else None,
         "wind_speed_kph": activity.wind_speed,
         # User content
         "notes": activity.notes,

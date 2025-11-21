@@ -2,45 +2,33 @@
 
 import json
 import socket
-import webbrowser
-from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+import webbrowser
 
+import httpx
 import typer
 from rich.console import Console
 from rich.panel import Panel
+
+from cli import display
+from cli.api import get_api_url
 
 app = typer.Typer(help="Authentication commands")
 console = Console()
 
 # Config directory
 CONFIG_DIR = Path.home() / ".config" / "stk"
-TOKENS_FILE = CONFIG_DIR / "tokens.json"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+
+TIMEOUT = 30.0
 
 
 def ensure_config_dir() -> None:
     """Create config directory if it doesn't exist."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def save_tokens(token_data: dict[str, Any]) -> None:
-    """Save tokens to config file."""
-    ensure_config_dir()
-    with open(TOKENS_FILE, "w") as f:
-        json.dump(token_data, f, indent=2)
-
-
-def get_tokens() -> dict[str, Any] | None:
-    """Load tokens from config file."""
-    if not TOKENS_FILE.exists():
-        return None
-    with open(TOKENS_FILE) as f:
-        data: dict[str, Any] = json.load(f)
-        return data
 
 
 def save_config(config: dict[str, str]) -> None:
@@ -112,52 +100,20 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             </html>
             """)
         elif "error" in params:
-            OAuthCallbackHandler.error = params.get("error_description", params["error"])[0]
+            OAuthCallbackHandler.error = params["error"][0]
             self.send_response(400)
             self.send_header("Content-type", "text/html")
             self.end_headers()
-            self.wfile.write(f"<h1>Error</h1><p>{OAuthCallbackHandler.error}</p>".encode())
+            self.wfile.write(b"<h1>Login Failed</h1>")
         else:
-            self.send_response(404)
+            self.send_response(400)
+            self.send_header("Content-type", "text/html")
             self.end_headers()
+            self.wfile.write(b"<h1>Invalid Callback</h1>")
 
     def log_message(self, format: str, *args: object) -> None:
         """Suppress default logging."""
         pass
-
-
-def wait_for_oauth_callback(port: int = 8000, timeout: int = 120) -> str:
-    """
-    Start a temporary server to receive OAuth callback.
-
-    Args:
-        port: Port to listen on
-        timeout: Timeout in seconds
-
-    Returns:
-        Authorization code
-
-    Raises:
-        TimeoutError: If no callback received
-        ValueError: If callback contains error
-    """
-    # Reset state
-    OAuthCallbackHandler.auth_code = None
-    OAuthCallbackHandler.error = None
-
-    server = HTTPServer(("localhost", port), OAuthCallbackHandler)
-    server.timeout = timeout
-
-    # Handle one request
-    server.handle_request()
-    server.server_close()
-
-    if OAuthCallbackHandler.error:
-        raise ValueError(OAuthCallbackHandler.error)
-    if not OAuthCallbackHandler.auth_code:
-        raise TimeoutError("No authorization code received")
-
-    return OAuthCallbackHandler.auth_code
 
 
 def is_port_available(port: int) -> bool:
@@ -175,48 +131,41 @@ def login(
     no_browser: bool = typer.Option(False, "--no-browser", help="Don't open browser automatically"),
 ) -> None:
     """Login to SmashRun via OAuth."""
-    from cli import display
-
-    try:
-        from shared.config import get_settings
-        from shared.smashrun import SmashRunOAuthClient
-    except ImportError as e:
-        display.display_error(f"Missing dependencies: {e}")
-        display.display_info("Run 'uv sync' to install dependencies")
-        raise typer.Exit(1) from None
-
-    # Get settings
-    try:
-        settings = get_settings()
-    except Exception as e:
-        display.display_error(f"Failed to load settings: {e}")
-        display.display_info(
-            "Check your .env file has SMASHRUN_CLIENT_ID and SMASHRUN_CLIENT_SECRET"
-        )
-        raise typer.Exit(1) from None
-
-    # Create OAuth client
-    oauth_client = SmashRunOAuthClient(
-        client_id=settings.smashrun_client_id,
-        client_secret=settings.smashrun_client_secret,
-        redirect_uri=settings.smashrun_redirect_uri,
-    )
-
-    # Get authorization URL
-    auth_url = oauth_client.get_authorization_url(state="stk_cli")
+    port = 9876
+    redirect_uri = f"http://localhost:{port}/callback"
 
     # Check if we can use automatic callback
-    port = 8000
     if not is_port_available(port):
-        if not no_browser:
-            display.display_warning(f"Port {port} is in use - cannot auto-capture callback")
-            display.display_info("Stop the other service or use: stk auth login --no-browser")
-            display.display_info(f"Check what's using port {port}: lsof -i :{port}")
-        use_auto_callback = False
-    else:
-        use_auto_callback = not no_browser
+        display.display_error(f"Port {port} is in use")
+        display.display_info(f"Check what's using it: lsof -i :{port}")
+        raise typer.Exit(1)
 
-    if use_auto_callback:
+    # Get login URL from API
+    display.display_sync_progress("Getting login URL...")
+
+    try:
+        url = f"{get_api_url()}/auth/login-url"
+        response = httpx.get(url, params={"redirect_uri": redirect_uri}, timeout=TIMEOUT)
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
+        auth_url = data["auth_url"]
+    except Exception as e:
+        display.display_error(f"Failed to get login URL: {e}")
+        raise typer.Exit(1) from None
+
+    # Show panel and open browser
+    if no_browser:
+        console.print(
+            Panel(
+                "[bold]Authorize with SmashRun[/bold]\n\n"
+                f"[cyan]{auth_url}[/cyan]\n\n"
+                "After authorizing, copy the [bold]code[/bold] from the URL.",
+                title="Login",
+                border_style="cyan",
+            )
+        )
+        auth_code = typer.prompt("Paste authorization code")
+    else:
         console.print(
             Panel(
                 "[bold]Authorize with SmashRun[/bold]\n\n"
@@ -227,15 +176,14 @@ def login(
             )
         )
 
-        # Start server FIRST, then open browser
-        # Reset state
+        # Reset state and start server
         OAuthCallbackHandler.auth_code = None
         OAuthCallbackHandler.error = None
 
         server = HTTPServer(("localhost", port), OAuthCallbackHandler)
         server.timeout = 120
 
-        # Now open browser
+        # Open browser
         webbrowser.open(auth_url)
 
         # Wait for callback
@@ -245,11 +193,10 @@ def login(
 
             if OAuthCallbackHandler.error:
                 display.display_error(f"Authorization failed: {OAuthCallbackHandler.error}")
-                raise typer.Exit(1) from None
+                raise typer.Exit(1)
             if not OAuthCallbackHandler.auth_code:
                 display.display_error("Timed out waiting for authorization")
-                display.display_info("Try again or use --no-browser for manual mode")
-                raise typer.Exit(1) from None
+                raise typer.Exit(1)
 
             auth_code = OAuthCallbackHandler.auth_code
             display.display_sync_progress("Authorization received!", done=True)
@@ -257,91 +204,45 @@ def login(
             server.server_close()
             display.display_error(f"Callback failed: {e}")
             raise typer.Exit(1) from None
-    else:
-        # Fallback to manual code entry
-        console.print(
-            Panel(
-                "[bold]Authorize with SmashRun[/bold]\n\n"
-                f"[cyan]{auth_url}[/cyan]\n\n"
-                "After authorizing, copy the [bold]code[/bold] from the URL.\n"
-                "(The part after 'code=' and before '&')",
-                title="Login",
-                border_style="cyan",
-            )
-        )
 
-        if not no_browser:
-            console.print("\n[dim]Opening browser...[/dim]")
-            webbrowser.open(auth_url)
-
-        console.print()
-        auth_code = typer.prompt("Paste authorization code")
-
-        if not auth_code:
-            display.display_error("No code provided")
-            raise typer.Exit(1) from None
-
-    # Exchange code for tokens
-    display.display_sync_progress("Exchanging code for tokens...")
+    # Exchange code via API
+    display.display_sync_progress("Completing login...")
 
     try:
-        token_data = oauth_client.exchange_code_for_token(auth_code)
+        url = f"{get_api_url()}/auth/callback"
+        response = httpx.post(
+            url,
+            json={"code": auth_code, "redirect_uri": redirect_uri},
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
 
-        # Add expiration timestamp
-        token_data["expires_at"] = (
-            datetime.now(UTC) + timedelta(seconds=token_data["expires_in"])
-        ).isoformat()
+        user_id = result["user_id"]
+        username = result["username"]
+        created = result.get("created", False)
 
-        # Save tokens
-        save_tokens(token_data)
-        display.display_sync_progress("Tokens saved", done=True)
+        # Save to config
+        config = get_config()
+        config["user_id"] = user_id
+        config["username"] = username
+        save_config(config)
 
-        # Get SmashRun user info
-        display.display_sync_progress("Getting SmashRun profile...")
-        from shared.smashrun import SmashRunAPIClient
-
-        with SmashRunAPIClient(access_token=token_data["access_token"]) as api_client:
-            user_info = api_client.get_user_info()
-            username = user_info.get("userName", "unknown")
-            user_id_smashrun = str(user_info.get("id", ""))
-
-        display.display_sync_progress(f"Welcome, {username}!", done=True)
-
-        # Register with Supabase
-        display.display_sync_progress("Registering with MyRunStreak...")
-        try:
-            from shared.supabase_client import get_supabase_client
-            from shared.supabase_ops import UsersRepository
-
-            supabase = get_supabase_client()
-            users_repo = UsersRepository(supabase)
-
-            user, created = users_repo.get_or_create_user_with_source(
-                source_type="smashrun",
-                source_username=username,
-                source_user_id=user_id_smashrun,
-                display_name=username,
-            )
-
-            user_id = user["user_id"]
-
-            # Save user_id to config
-            config = get_config()
-            config["user_id"] = user_id
-            config["username"] = username
-            save_config(config)
-
-            if created:
-                display.display_sync_progress("Account created!", done=True)
-            else:
-                display.display_sync_progress("Account linked!", done=True)
-
-        except Exception as e:
-            display.display_warning(f"Could not register with Supabase: {e}")
-            display.display_info("You can still use stk, but cloud sync may not work")
+        if created:
+            display.display_sync_progress(f"Account created for {username}!", done=True)
+        else:
+            display.display_sync_progress(f"Welcome back, {username}!", done=True)
 
         console.print("\n[green]You can now run 'stk sync' to fetch your runs![/green]")
 
+    except httpx.HTTPStatusError as e:
+        try:
+            error_data = e.response.json()
+            error_msg = error_data.get("message", e.response.text)
+        except Exception:
+            error_msg = e.response.text
+        display.display_error(f"Login failed: {error_msg}")
+        raise typer.Exit(1) from None
     except Exception as e:
         display.display_error(f"Login failed: {e}")
         raise typer.Exit(1) from None
@@ -350,17 +251,8 @@ def login(
 @app.command()
 def logout() -> None:
     """Remove saved credentials."""
-    from cli import display
-
-    removed = False
-    if TOKENS_FILE.exists():
-        TOKENS_FILE.unlink()
-        removed = True
     if CONFIG_FILE.exists():
         CONFIG_FILE.unlink()
-        removed = True
-
-    if removed:
         display.display_sync_progress("Logged out", done=True)
         display.display_info(f"Removed config from {CONFIG_DIR}")
     else:
@@ -370,49 +262,17 @@ def logout() -> None:
 @app.command()
 def status() -> None:
     """Show authentication status."""
-    from cli import display
-
-    tokens = get_tokens()
     config = get_config()
 
-    if not tokens:
+    if not config.get("user_id"):
         display.display_warning("Not logged in")
         display.display_info("Run 'stk auth login' to authenticate")
         return
 
-    # Show username if available
-    username = config.get("username")
-    if username:
-        console.print(f"[bold]User:[/bold] {username}")
+    username = config.get("username", "Unknown")
+    user_id = config.get("user_id", "")
 
-    # Check expiration
-    expires_at_str = tokens.get("expires_at")
-    if expires_at_str:
-        expires_at = datetime.fromisoformat(expires_at_str)
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-
-        now = datetime.now(UTC)
-        if now >= expires_at:
-            display.display_warning("Token expired")
-            display.display_info(
-                "Run 'stk sync' to refresh, or 'stk auth login' to re-authenticate"
-            )
-        else:
-            days_left = (expires_at - now).days
-            if days_left > 1:
-                display.display_sync_progress(f"Logged in (expires in {days_left} days)", done=True)
-            else:
-                hours_left = int((expires_at - now).total_seconds() / 3600)
-                display.display_warning(f"Token expires in {hours_left} hours")
-    else:
-        display.display_sync_progress("Logged in", done=True)
-
-    # Show user_id status
-    user_id = config.get("user_id")
-    if user_id:
-        display.display_info(f"User ID: {user_id[:8]}...")
-    else:
-        display.display_warning("No user ID - run 'stk auth login' to register")
-
+    console.print(f"[bold]User:[/bold] {username}")
+    display.display_sync_progress("Logged in", done=True)
+    display.display_info(f"User ID: {user_id[:8]}...")
     display.display_info(f"Config: {CONFIG_DIR}")

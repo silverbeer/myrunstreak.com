@@ -65,6 +65,7 @@ class SmashRunAPIClient:
         count: int = 100,
         since: date | None = None,
         until: date | None = None,
+        incremental: bool = False,
     ) -> list[dict[str, Any]]:
         """
         Fetch activities with pagination and optional date filtering.
@@ -74,6 +75,8 @@ class SmashRunAPIClient:
             count: Number of activities per page (max 100)
             since: Only fetch activities on or after this date
             until: Only fetch activities on or before this date
+            incremental: If True, use fromDate to filter by sync date (for incremental syncs).
+                        If False, filter by activity date client-side (for historical syncs).
 
         Returns:
             List of activity dictionaries from SmashRun API
@@ -86,10 +89,13 @@ class SmashRunAPIClient:
             "count": min(count, 100),  # SmashRun max is 100
         }
 
-        if since:
-            params["since"] = since.isoformat()
-        if until:
-            params["until"] = until.isoformat()
+        # SmashRun API 'fromDate' filters by SYNC date (when activity was added/updated),
+        # not by activity date. Only use it for incremental syncs.
+        if since and incremental:
+            from datetime import datetime, timezone
+            # Convert date to Unix timestamp (start of day UTC)
+            since_dt = datetime.combine(since, datetime.min.time(), tzinfo=timezone.utc)
+            params["fromDate"] = int(since_dt.timestamp())
 
         logger.info(f"Fetching activities page {page} with count {count}")
 
@@ -97,7 +103,34 @@ class SmashRunAPIClient:
         response.raise_for_status()
 
         activities = cast(list[dict[str, Any]], response.json())
-        logger.info(f"Retrieved {len(activities)} activities")
+        logger.info(f"Retrieved {len(activities)} activities from API")
+
+        # Filter by activity date client-side (both since and until)
+        if (since or until) and activities:
+            from datetime import datetime
+
+            filtered = []
+            for activity in activities:
+                # Parse startDateTimeLocal (format: "2025-11-20T06:30:00")
+                start_str = activity.get("startDateTimeLocal", "")
+                if start_str:
+                    try:
+                        activity_date = datetime.fromisoformat(start_str).date()
+                        # Check since filter
+                        if since and activity_date < since:
+                            continue
+                        # Check until filter
+                        if until and activity_date > until:
+                            continue
+                        filtered.append(activity)
+                    except ValueError:
+                        # If we can't parse, include it
+                        filtered.append(activity)
+                else:
+                    filtered.append(activity)
+
+            logger.info(f"Filtered to {len(filtered)} activities ({since} to {until})")
+            return filtered
 
         return activities
 
