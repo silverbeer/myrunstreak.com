@@ -259,15 +259,16 @@ def validate_env_config() -> tuple[bool, list[str]]:
     Returns:
         Tuple of (is_valid, list of error messages)
     """
-    from pathlib import Path
     import os
+
+    from shared.config import find_env_file
 
     errors = []
 
-    # Check if .env file exists
-    env_path = Path.cwd() / ".env"
-    if not env_path.exists():
-        errors.append("No .env file found in current directory")
+    # Find .env file at git root
+    env_path = find_env_file()
+    if not env_path:
+        errors.append("No .env file found in project")
         errors.append("Copy .env.example to .env and fill in your credentials")
         return False, errors
 
