@@ -1,10 +1,12 @@
 """Lambda function handler for querying running statistics (multi-user)."""
 
 import json
+import os
 from datetime import date, timedelta
 from typing import Any, cast
 from uuid import UUID
 
+import boto3
 from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.event_handler import APIGatewayRestResolver
 from aws_lambda_powertools.metrics import MetricUnit
@@ -488,6 +490,21 @@ def sync_runs() -> dict[str, Any]:
     metrics.add_metric(name="RunsSynced", unit=MetricUnit.Count, value=runs_synced)
 
     logger.info(f"Sync completed: {runs_synced} runs")
+
+    # Invoke publish_status Lambda to update public status JSON
+    publish_status_function = os.environ.get("PUBLISH_STATUS_FUNCTION_NAME")
+    if publish_status_function:
+        try:
+            lambda_client = boto3.client("lambda")
+            lambda_client.invoke(
+                FunctionName=publish_status_function,
+                InvocationType="Event",  # Async invocation
+                Payload=json.dumps({"user_id": str(user_id)}),
+            )
+            logger.info(f"Triggered publish_status for user {user_id}")
+        except Exception as e:
+            # Don't fail sync if publish_status fails
+            logger.warning(f"Failed to invoke publish_status: {e}")
 
     return {
         "message": "Sync completed",

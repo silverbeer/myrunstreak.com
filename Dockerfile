@@ -50,6 +50,10 @@ RUN uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements.tx
 # Copy application source code
 COPY src/ ${LAMBDA_TASK_ROOT}/src/
 
+# Fix permissions - strip any macOS extended attributes issues
+# Ensure all files are readable
+RUN chmod -R 755 ${LAMBDA_TASK_ROOT}/src
+
 # Create the Lambda handler entry point
 # This imports the correct handler based on HANDLER_MODULE build arg
 RUN printf '%s\n' \
