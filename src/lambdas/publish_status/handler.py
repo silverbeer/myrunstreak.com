@@ -22,6 +22,14 @@ GCS_BUCKET_NAME = "myrunstreak-public"
 GCS_OBJECT_PATH = "status.json"
 ENVIRONMENT = "dev"
 
+# Conversion factor
+KM_TO_MILES = 0.621371
+
+
+def km_to_miles(km: float) -> float:
+    """Convert kilometers to miles."""
+    return km * KM_TO_MILES
+
 
 def get_gcs_credentials() -> dict[str, Any]:
     """Get GCS service account credentials from Secrets Manager."""
@@ -90,19 +98,21 @@ def build_status_data(user_id: UUID, runs_repo: RunsRepository) -> dict[str, Any
     last_run = None
     if recent_runs:
         latest = recent_runs[0]  # Already sorted desc by date
+        distance_mi = km_to_miles(float(latest["distance_km"]))
         last_run = {
             "date": latest["start_date"],
-            "distance_km": round(float(latest["distance_km"]), 2),
+            "distance_mi": round(distance_mi, 2),
             "duration_min": round(float(latest["duration_seconds"]) / 60, 1),
         }
 
-    # Build last 7 days array
+    # Build last 7 days array (in miles)
     last_7_days = []
     for run in recent_runs:
+        distance_mi = km_to_miles(float(run["distance_km"]))
         last_7_days.append(
             {
                 "date": run["start_date"],
-                "distance_km": round(float(run["distance_km"]), 2),
+                "distance_mi": round(distance_mi, 2),
             }
         )
 
@@ -110,6 +120,18 @@ def build_status_data(user_id: UUID, runs_repo: RunsRepository) -> dict[str, Any
     streak_start = None
     if streak_days > 0:
         streak_start = (today - timedelta(days=streak_days - 1)).isoformat()
+
+    # Get runs for this month
+    first_of_month = today.replace(day=1)
+    month_runs = runs_repo.get_runs_by_date_range(user_id, first_of_month, today)
+    month_total_km = sum(float(run["distance_km"]) for run in month_runs)
+    month_total_mi = round(km_to_miles(month_total_km), 1)
+
+    # Get runs for this year
+    first_of_year = today.replace(month=1, day=1)
+    year_runs = runs_repo.get_runs_by_date_range(user_id, first_of_year, today)
+    year_total_km = sum(float(run["distance_km"]) for run in year_runs)
+    year_total_mi = round(km_to_miles(year_total_km), 1)
 
     return {
         "updated_at": datetime.now(UTC).isoformat(),
@@ -120,6 +142,8 @@ def build_status_data(user_id: UUID, runs_repo: RunsRepository) -> dict[str, Any
         },
         "last_run": last_run,
         "last_7_days": last_7_days,
+        "month_total_mi": month_total_mi,
+        "year_total_mi": year_total_mi,
     }
 
 
