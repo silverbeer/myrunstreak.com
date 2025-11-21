@@ -517,6 +517,30 @@ def login(
             else:
                 display.display_sync_progress("Account linked!", done=True)
 
+            # Store tokens in Supabase via API
+            display.display_sync_progress("Storing tokens in cloud...")
+            try:
+                import httpx
+
+                from cli.api import get_api_url
+
+                store_url = f"{get_api_url()}/auth/store-tokens"
+                store_response = httpx.post(
+                    store_url,
+                    params={"user_id": user_id},
+                    json={
+                        "access_token": token_data["access_token"],
+                        "refresh_token": token_data["refresh_token"],
+                        "expires_in": token_data.get("expires_in"),
+                    },
+                    timeout=30.0,
+                )
+                store_response.raise_for_status()
+                display.display_sync_progress("Tokens stored in cloud", done=True)
+            except Exception as e:
+                display.display_warning(f"Could not store tokens in cloud: {e}")
+                display.display_info("Sync may not work until you login again")
+
         except Exception as e:
             display.display_warning(f"Could not register with Supabase: {e}")
             display.display_info("You can still use stk, but cloud sync may not work")

@@ -136,8 +136,7 @@ class RunsRepository:
         """
         Get overall running statistics for a user.
 
-        Uses client-side aggregation for now (PostgREST doesn't support aggregate functions).
-        TODO: Create stored procedure for server-side aggregation.
+        Uses database-level aggregation via RPC to avoid PostgREST row limits.
 
         Args:
             user_id: User UUID
@@ -145,13 +144,31 @@ class RunsRepository:
         Returns:
             Dict with total_runs, total_km, avg_km, longest_run_km, avg_pace
         """
-        # Get all runs for user (we'll aggregate client-side)
-        # Note: PostgREST has a default limit of 1000, so we set a high limit
+        try:
+            # Use database function for server-side aggregation
+            result = self.supabase.rpc("get_user_stats", {"p_user_id": str(user_id)}).execute()
+
+            if result.data:
+                stats = result.data
+                # Handle both direct dict and list responses
+                if isinstance(stats, list) and len(stats) > 0:
+                    stats = stats[0]
+                return {
+                    "total_runs": int(stats.get("total_runs", 0)),
+                    "total_km": float(stats.get("total_km", 0)),
+                    "avg_km": float(stats.get("avg_km", 0)),
+                    "longest_run_km": float(stats.get("longest_run_km", 0)),
+                    "avg_pace_min_per_km": float(stats.get("avg_pace_min_per_km", 0)),
+                }
+        except Exception as e:
+            logger.warning(f"RPC get_user_stats failed, falling back to client-side: {e}")
+
+        # Fallback to client-side aggregation (limited to 1000 rows)
         result = (
             self.supabase.table("runs")
             .select("distance_km, average_pace_min_per_km")
             .eq("user_id", str(user_id))
-            .limit(10000)  # Override PostgREST default of 1000
+            .limit(10000)
             .execute()
         )
 
@@ -166,7 +183,6 @@ class RunsRepository:
                 "avg_pace_min_per_km": 0,
             }
 
-        # Client-side aggregation
         total_runs = len(runs)
         distances = [float(r["distance_km"]) for r in runs]
         paces = [
@@ -210,7 +226,7 @@ class RunsRepository:
         """
         Get the user's current running streak (consecutive days).
 
-        Uses a simple approach: count consecutive days backwards from today.
+        Uses database function to avoid row limits and ensure accurate count.
 
         Args:
             user_id: User UUID
@@ -218,13 +234,24 @@ class RunsRepository:
         Returns:
             Number of consecutive days with runs (0 if no current streak)
         """
-        # Get all distinct run dates in descending order
+        try:
+            # Use database function for accurate streak calculation
+            result = self.supabase.rpc(
+                "get_current_streak", {"p_user_id": str(user_id)}
+            ).execute()
+
+            if result.data is not None:
+                return int(result.data)
+        except Exception as e:
+            logger.warning(f"RPC get_current_streak failed, falling back: {e}")
+
+        # Fallback to client-side calculation (limited to 1000 rows)
         result = (
             self.supabase.table("runs")
             .select("start_date")
             .eq("user_id", str(user_id))
             .order("start_date", desc=True)
-            .limit(10000)  # Override PostgREST default of 1000
+            .limit(10000)
             .execute()
         )
 
@@ -233,12 +260,14 @@ class RunsRepository:
         if not data_list:
             return 0
 
-        # Convert to set of dates for fast lookup
         run_dates = {date.fromisoformat(row["start_date"]) for row in data_list}
-
-        # Count consecutive days from today
         current_date = date.today()
         streak = 0
+
+        if current_date not in run_dates:
+            current_date = date.fromordinal(current_date.toordinal() - 1)
+            if current_date not in run_dates:
+                return 0
 
         while current_date in run_dates:
             streak += 1

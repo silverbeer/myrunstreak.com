@@ -197,12 +197,9 @@ module "lambda" {
   eventbridge_rule_arn      = null
 
   # Additional environment variables needed by the sync handler
+  # Note: Secrets (Supabase, SmashRun credentials) are fetched from Secrets Manager
   extra_environment_variables = {
-    SMASHRUN_CLIENT_ID     = var.smashrun_client_id
-    SMASHRUN_CLIENT_SECRET = var.smashrun_client_secret
-    SMASHRUN_REDIRECT_URI  = "urn:ietf:wg:oauth:2.0:oob"  # Out-of-band redirect for CLI
-    SUPABASE_URL           = var.supabase_url
-    SUPABASE_KEY           = var.supabase_service_role_key
+    SMASHRUN_REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"  # Out-of-band redirect for CLI
   }
 
   tags = local.common_tags
@@ -256,10 +253,8 @@ module "lambda_query" {
   eventbridge_rule_arn      = null
 
   # Environment variables for query handler
-  extra_environment_variables = {
-    SUPABASE_URL = var.supabase_url
-    SUPABASE_KEY = var.supabase_service_role_key
-  }
+  # Note: Supabase credentials are fetched from Secrets Manager
+  extra_environment_variables = {}
 
   tags = local.common_tags
 
@@ -469,6 +464,65 @@ resource "aws_api_gateway_integration" "runs_proxy" {
   uri                     = module.lambda_query.function_invoke_arn
 }
 
+# /sync resource for user-initiated sync via query Lambda
+resource "aws_api_gateway_resource" "sync_user" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = module.api_gateway.root_resource_id
+  path_part   = "sync-user"  # Different from /sync which goes to sync Lambda
+}
+
+# POST method for /sync-user
+resource "aws_api_gateway_method" "sync_user_post" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.sync_user.id
+  http_method   = "POST"
+  authorization = "NONE"  # Will use user_id for now
+}
+
+# Integration with query Lambda for /sync-user
+resource "aws_api_gateway_integration" "sync_user" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.sync_user.id
+  http_method = aws_api_gateway_method.sync_user_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.lambda_query.function_invoke_arn
+}
+
+# /auth resource for authentication endpoints
+resource "aws_api_gateway_resource" "auth" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = module.api_gateway.root_resource_id
+  path_part   = "auth"
+}
+
+# /auth/store-tokens resource
+resource "aws_api_gateway_resource" "auth_store_tokens" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = aws_api_gateway_resource.auth.id
+  path_part   = "store-tokens"
+}
+
+# POST method for /auth/store-tokens
+resource "aws_api_gateway_method" "auth_store_tokens_post" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.auth_store_tokens.id
+  http_method   = "POST"
+  authorization = "NONE"  # Will use user_id for now
+}
+
+# Integration with query Lambda for /auth/store-tokens
+resource "aws_api_gateway_integration" "auth_store_tokens" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.auth_store_tokens.id
+  http_method = aws_api_gateway_method.auth_store_tokens_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.lambda_query.function_invoke_arn
+}
+
 # ==============================================================================
 # API Gateway Deployment for Query Endpoints
 # ==============================================================================
@@ -491,6 +545,13 @@ resource "aws_api_gateway_deployment" "query_endpoints" {
       aws_api_gateway_resource.runs_proxy.id,
       aws_api_gateway_method.runs_proxy_get.id,
       aws_api_gateway_integration.runs_proxy.id,
+      aws_api_gateway_resource.sync_user.id,
+      aws_api_gateway_method.sync_user_post.id,
+      aws_api_gateway_integration.sync_user.id,
+      aws_api_gateway_resource.auth.id,
+      aws_api_gateway_resource.auth_store_tokens.id,
+      aws_api_gateway_method.auth_store_tokens_post.id,
+      aws_api_gateway_integration.auth_store_tokens.id,
     ]))
   }
 
@@ -502,6 +563,8 @@ resource "aws_api_gateway_deployment" "query_endpoints" {
     aws_api_gateway_integration.stats_proxy,
     aws_api_gateway_integration.runs_get,
     aws_api_gateway_integration.runs_proxy,
+    aws_api_gateway_integration.sync_user,
+    aws_api_gateway_integration.auth_store_tokens,
   ]
 }
 

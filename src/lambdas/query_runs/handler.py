@@ -1,15 +1,19 @@
 """Lambda function handler for querying running statistics (multi-user)."""
 
 import json
+from datetime import date, timedelta
 from typing import Any, cast
 from uuid import UUID
 
 from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+from aws_lambda_powertools.metrics import MetricUnit
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
+from src.shared.secrets import get_smashrun_oauth_credentials
+from src.shared.smashrun import SmashRunAPIClient, SmashRunOAuthClient
 from src.shared.supabase_client import get_supabase_client
-from src.shared.supabase_ops import RunsRepository
+from src.shared.supabase_ops import RunsRepository, TokenRepository, activity_to_run_dict
 
 # Initialize Lambda Powertools
 logger = Logger(service="myrunstreak-query")
@@ -146,10 +150,10 @@ def get_monthly_stats() -> dict[str, Any]:
             {
                 "month": f"{month['start_year']}-{month['start_month']:02d}-01",
                 "run_count": month["run_count"],
-                "total_km": float(month["total_distance_km"]),
-                "avg_km": float(month["avg_distance_km"]),
+                "total_km": float(month["total_km"]),
+                "avg_km": float(month["avg_km"]),
                 "avg_pace_min_per_km": (
-                    float(month["avg_pace_min_per_km"]) if month["avg_pace_min_per_km"] else None
+                    float(month["avg_pace"]) if month["avg_pace"] else None
                 ),
             }
         )
@@ -257,9 +261,9 @@ def get_records() -> dict[str, Any]:
     # Most distance in a month
     monthly_result = (
         supabase.table("monthly_summary")
-        .select("start_year, start_month, run_count, total_distance_km")
+        .select("start_year, start_month, run_count, total_km")
         .eq("user_id", str(user_id))
-        .order("total_distance_km", desc=True)
+        .order("total_km", desc=True)
         .limit(1)
         .execute()
     )
@@ -270,7 +274,7 @@ def get_records() -> dict[str, Any]:
         records["most_km_month"] = {
             "month": f"{monthly['start_year']}-{monthly['start_month']:02d}-01",
             "run_count": monthly["run_count"],
-            "total_km": float(monthly["total_distance_km"]),
+            "total_km": float(monthly["total_km"]),
         }
 
     # Note: Weekly bests would require a similar view (not implemented yet)
@@ -335,6 +339,214 @@ def list_runs() -> dict[str, Any]:
         "limit": limit,
         "count": len(runs),
         "runs": runs,
+    }
+
+
+@app.post("/sync-user")
+def sync_runs() -> dict[str, Any]:
+    """
+    Sync runs from SmashRun to Supabase.
+
+    Query Parameters:
+        user_id (required): User UUID
+
+    Body (optional JSON):
+        since: Date string (YYYY-MM-DD) - sync runs from this date
+        until: Date string (YYYY-MM-DD) - sync runs until this date
+        full: Boolean - if true, sync all runs (ignores since/until)
+
+    Returns:
+        Sync results with count of runs synced
+    """
+    user_id = get_user_id_from_request()
+    logger.info(f"Starting sync for user {user_id}")
+
+    # Parse request body
+    body: dict[str, Any] = {}
+    if app.current_event.body:
+        try:
+            body = json.loads(app.current_event.body)
+        except json.JSONDecodeError:
+            pass
+
+    # Determine date range
+    if body.get("full"):
+        # Full sync - get all runs (use a very old date)
+        since_date = date(2010, 1, 1)
+        until_date = date.today()
+        logger.info("Full sync requested")
+    else:
+        # Parse since date (default: last 7 days)
+        since_str = body.get("since")
+        if since_str:
+            since_date = date.fromisoformat(since_str)
+        else:
+            since_date = date.today() - timedelta(days=7)
+
+        # Parse until date (default: today)
+        until_str = body.get("until")
+        if until_str:
+            until_date = date.fromisoformat(until_str)
+        else:
+            until_date = date.today()
+
+    logger.info(f"Sync date range: {since_date} to {until_date}")
+
+    # Initialize repositories
+    supabase = get_supabase_client()
+    runs_repo = RunsRepository(supabase)
+    token_repo = TokenRepository(supabase)
+
+    # Get user's source ID
+    source_id = token_repo.get_source_id_for_user(user_id, "smashrun")
+    if not source_id:
+        raise ValueError(f"No SmashRun source found for user {user_id}")
+
+    # Get user's tokens from Supabase
+    tokens = token_repo.get_user_tokens(user_id, "smashrun")
+    if not tokens:
+        raise ValueError(f"No tokens found for user {user_id}. Please authenticate first.")
+
+    access_token = tokens["access_token"]
+    refresh_token = tokens["refresh_token"]
+
+    # Check if token needs refresh
+    if token_repo.is_token_expired(user_id, "smashrun"):
+        logger.info("Token expired, refreshing...")
+
+        # Get SmashRun OAuth credentials from Secrets Manager
+        smashrun_creds = get_smashrun_oauth_credentials()
+
+        # Initialize OAuth client
+        oauth_client = SmashRunOAuthClient(
+            client_id=smashrun_creds.get("client_id", ""),
+            client_secret=smashrun_creds.get("client_secret", ""),
+            redirect_uri="urn:ietf:wg:oauth:2.0:oob",
+        )
+
+        # Refresh the token
+        new_tokens = oauth_client.refresh_access_token(refresh_token)
+        access_token = new_tokens["access_token"]
+        new_refresh_token = new_tokens.get("refresh_token", refresh_token)
+
+        # Save new tokens to Supabase
+        token_repo.save_user_tokens(
+            user_id=user_id,
+            access_token=access_token,
+            refresh_token=new_refresh_token,
+            expires_in=new_tokens.get("expires_in"),
+            source_type="smashrun",
+        )
+
+        logger.info("Token refreshed successfully")
+
+    # Fetch and store runs
+    runs_synced = 0
+
+    with SmashRunAPIClient(access_token=access_token) as api_client:
+        logger.info("Fetching activities from SmashRun")
+
+        # Get activities in date range
+        activities = api_client.get_all_activities_since(since_date)
+
+        # Filter by until_date
+        activities = [
+            a for a in activities
+            if date.fromisoformat(a.get("startDateTimeLocal", "")[:10]) <= until_date
+        ]
+
+        logger.info(f"Found {len(activities)} activities in date range")
+
+        # Store each activity
+        for activity_data in activities:
+            try:
+                # Parse activity
+                activity = api_client.parse_activity(activity_data)
+
+                # Convert to run dict
+                run_data = activity_to_run_dict(activity, user_id, source_id)
+
+                # Upsert (insert or update if exists)
+                runs_repo.upsert_run(user_id, source_id, run_data)
+
+                runs_synced += 1
+                logger.debug(
+                    f"Synced: {activity.start_date_time_local.date()} - "
+                    f"{activity.distance:.2f} km"
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to process activity {activity_data.get('activityId')}: {e}")
+                continue
+
+    # Add metrics
+    metrics.add_metric(name="RunsSynced", unit=MetricUnit.Count, value=runs_synced)
+
+    logger.info(f"Sync completed: {runs_synced} runs")
+
+    return {
+        "message": "Sync completed",
+        "runs_synced": runs_synced,
+        "since": since_date.isoformat(),
+        "until": until_date.isoformat(),
+    }
+
+
+@app.post("/auth/store-tokens")
+def store_tokens() -> dict[str, Any]:
+    """
+    Store OAuth tokens for a user.
+
+    Query Parameters:
+        user_id (required): User UUID
+
+    Body (JSON):
+        access_token: OAuth access token (required)
+        refresh_token: OAuth refresh token (required)
+        expires_in: Token expiry in seconds (optional)
+
+    Returns:
+        Success message
+    """
+    user_id = get_user_id_from_request()
+    logger.info(f"Storing tokens for user {user_id}")
+
+    # Parse request body
+    if not app.current_event.body:
+        raise ValueError("Request body is required")
+
+    try:
+        body = json.loads(app.current_event.body)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in request body: {e}") from e
+
+    # Validate required fields
+    access_token = body.get("access_token")
+    refresh_token = body.get("refresh_token")
+    expires_in = body.get("expires_in")
+
+    if not access_token:
+        raise ValueError("access_token is required")
+    if not refresh_token:
+        raise ValueError("refresh_token is required")
+
+    # Store tokens in Supabase
+    supabase = get_supabase_client()
+    token_repo = TokenRepository(supabase)
+
+    token_repo.save_user_tokens(
+        user_id=user_id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=expires_in,
+        source_type="smashrun",
+    )
+
+    logger.info(f"Tokens stored successfully for user {user_id}")
+
+    return {
+        "message": "Tokens stored successfully",
+        "user_id": str(user_id),
     }
 
 

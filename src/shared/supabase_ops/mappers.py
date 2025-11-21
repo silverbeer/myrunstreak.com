@@ -44,14 +44,23 @@ def activity_to_run_dict(activity: Activity, user_id: UUID, source_id: UUID) -> 
     Returns:
         Dict ready for Supabase insert/upsert
     """
+    # Extract date from local time BEFORE any timezone conversion
+    # This ensures the date matches the user's local date, not UTC
+    local_dt = activity.start_date_time_local
+    start_date = local_dt.date().isoformat()
+
     return {
         # Multi-user identifiers
         "user_id": str(user_id),
         "source_id": str(source_id),
         "source_activity_id": activity.activity_id,  # Their API ID
         "external_id": activity.external_id,
-        # Temporal data (computed fields handled by trigger)
-        "start_date_time_local": activity.start_date_time_local.isoformat(),
+        # Temporal data - explicitly set date from local time
+        "start_date_time_local": local_dt.isoformat(),
+        "start_date": start_date,
+        "start_year": local_dt.year,
+        "start_month": local_dt.month,
+        "start_day_of_week": local_dt.weekday(),
         # Core metrics
         "distance_km": float(activity.distance),
         "duration_seconds": float(activity.duration),

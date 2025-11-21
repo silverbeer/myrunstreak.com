@@ -1,24 +1,20 @@
 """Sync commands for stk CLI."""
 
 import json
-import time
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 
 import typer
 from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
 from cli import display
+from cli.api import post_request
 
 console = Console()
 
 # Config directory
 CONFIG_DIR = Path.home() / ".config" / "stk"
-TOKENS_FILE = CONFIG_DIR / "tokens.json"
-CONFIG_FILE = CONFIG_DIR / "config.json"
 SYNC_STATE_FILE = CONFIG_DIR / "sync_state.json"
 
 
@@ -27,38 +23,13 @@ def ensure_config_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def get_tokens() -> dict[str, Any] | None:
-    """Load tokens from config file."""
-    if not TOKENS_FILE.exists():
-        return None
-    with open(TOKENS_FILE) as f:
-        data: dict[str, Any] = json.load(f)
-        return data
-
-
-def get_config() -> dict[str, Any]:
-    """Load config from file."""
-    if not CONFIG_FILE.exists():
-        return {}
-    with open(CONFIG_FILE) as f:
-        data: dict[str, Any] = json.load(f)
-        return data
-
-
-def save_tokens(token_data: dict[str, Any]) -> None:
-    """Save tokens to config file."""
-    ensure_config_dir()
-    with open(TOKENS_FILE, "w") as f:
-        json.dump(token_data, f, indent=2)
-
-
 def get_last_sync_date() -> date:
     """Get last sync date from state file."""
     if not SYNC_STATE_FILE.exists():
         return date.today() - timedelta(days=30)
 
     with open(SYNC_STATE_FILE) as f:
-        state = json.load(f)
+        state: dict[str, Any] = json.load(f)
         return date.fromisoformat(
             state.get("last_sync_date", str(date.today() - timedelta(days=30)))
         )
@@ -66,6 +37,8 @@ def get_last_sync_date() -> date:
 
 def update_sync_state(sync_date: date, runs_synced: int) -> None:
     """Update sync state file."""
+    from datetime import UTC, datetime
+
     ensure_config_dir()
     state = {
         "last_sync_date": sync_date.isoformat(),
@@ -81,8 +54,6 @@ def sync_runs(
     until: str | None = typer.Option(None, "--until", "-u", help="Sync until date (YYYY-MM-DD)"),
     year: int | None = typer.Option(None, "--year", "-y", help="Sync a specific year"),
     full: bool = typer.Option(False, "--full", "-f", help="Full sync (all time)"),
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Fetch but don't store"),
-    limit: int | None = typer.Option(None, "--limit", "-l", help="Limit number of runs to sync"),
 ) -> None:
     """
     Sync runs from SmashRun to MyRunStreak.
@@ -92,28 +63,8 @@ def sync_runs(
         stk sync --year 2015        # Sync all runs from 2015
         stk sync --since 2020-01-01 # Sync from Jan 1, 2020
         stk sync --full             # Sync everything (4000+ runs!)
-        stk sync --limit 1          # Sync just 1 run (for testing)
     """
-    # Check for tokens
-    tokens = get_tokens()
-    if not tokens:
-        display.display_error("Not logged in. Run 'stk auth login' first.")
-        raise typer.Exit(1)
-
-    # Check for user_id
-    config = get_config()
-    user_id_str = config.get("user_id")
-    if not user_id_str:
-        display.display_error("No user ID. Run 'stk auth login' first.")
-        raise typer.Exit(1)
-
-    user_id = UUID(user_id_str)
-
-    # Determine date range and sync mode
-    # incremental=True uses API's fromDate (filters by sync date, faster)
-    # incremental=False fetches all and filters by activity date (for historical)
-    incremental_sync = False
-
+    # Determine date range
     if year:
         since_date = date(year, 1, 1)
         until_date = date(year, 12, 31)
@@ -148,242 +99,43 @@ def sync_runs(
         # Default: incremental sync from last sync date
         since_date = get_last_sync_date()
         until_date = date.today()
-        incremental_sync = True
         display.display_info(f"Syncing since {since_date}")
 
-    # Import dependencies
-    try:
-        from shared.config import get_settings
-        from shared.smashrun import SmashRunAPIClient, SmashRunOAuthClient
-        from shared.supabase_client import get_supabase_client
-        from shared.supabase_ops import RunsRepository, UsersRepository, activity_to_run_dict
-    except ImportError as e:
-        display.display_error(f"Missing dependencies: {e}")
-        display.display_info("Run 'uv sync' to install dependencies")
-        raise typer.Exit(1) from None
+    # Build request body
+    request_data: dict[str, Any] = {}
+    if full:
+        request_data["full"] = True
+    else:
+        request_data["since"] = since_date.isoformat()
+        request_data["until"] = until_date.isoformat()
 
-    # Get settings
+    # Call API with longer timeout for sync operations
+    display.display_sync_progress("Syncing runs...")
+
     try:
-        settings = get_settings()
+        # Use 120 second timeout for sync operations (may take a while for full sync)
+        result = post_request("sync-user", data=request_data, timeout=120.0)
+
+        runs_synced = result.get("runs_synced", 0)
+        sync_since = result.get("since", since_date.isoformat())
+        sync_until = result.get("until", until_date.isoformat())
+
+        # Update local sync state
+        if runs_synced > 0:
+            update_sync_state(date.fromisoformat(sync_until), runs_synced)
+
+        # Show results
+        console.print()
+        display.display_sync_progress(f"Synced {runs_synced} runs", done=True)
+
+        if runs_synced == 0:
+            display.display_info("You're up to date!")
+        else:
+            display.display_info(f"Date range: {sync_since} to {sync_until}")
+
+    except SystemExit:
+        # Re-raise SystemExit from post_request error handling
+        raise
     except Exception as e:
-        display.display_error(f"Failed to load settings: {e}")
-        display.display_info("Check your .env file")
+        display.display_error(f"Sync failed: {e}")
         raise typer.Exit(1) from None
-
-    # Check token expiration and refresh if needed
-    oauth_client = SmashRunOAuthClient(
-        client_id=settings.smashrun_client_id,
-        client_secret=settings.smashrun_client_secret,
-        redirect_uri=settings.smashrun_redirect_uri,
-    )
-
-    access_token = tokens.get("access_token")
-    expires_at_str = tokens.get("expires_at")
-
-    if expires_at_str:
-        expires_at = datetime.fromisoformat(expires_at_str)
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-
-        if datetime.now(UTC) + timedelta(days=1) >= expires_at:
-            display.display_sync_progress("Refreshing token...")
-            try:
-                new_tokens = oauth_client.refresh_access_token(tokens["refresh_token"])
-                new_tokens["expires_at"] = (
-                    datetime.now(UTC) + timedelta(seconds=new_tokens["expires_in"])
-                ).isoformat()
-                save_tokens(new_tokens)
-                access_token = new_tokens["access_token"]
-                display.display_sync_progress("Token refreshed", done=True)
-            except Exception as e:
-                display.display_error(f"Failed to refresh token: {e}")
-                display.display_info("Try 'stk auth login' to re-authenticate")
-                raise typer.Exit(1) from None
-
-    # Sync runs
-    runs_synced = 0
-    runs_failed = 0
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        fetch_task = progress.add_task("Connecting to SmashRun...", total=None)
-
-        try:
-            with SmashRunAPIClient(access_token=access_token) as api_client:
-                # Get user info
-                progress.update(fetch_task, description="Getting user info...")
-                user_info = api_client.get_user_info()
-                username = user_info.get("userName", "Unknown")
-
-                # Fetch activities
-                progress.update(
-                    fetch_task,
-                    description=f"Fetching runs {since_date} to {until_date}...",
-                )
-
-                # Use get_activities with date range for better control
-                all_activities = []
-                page = 0
-                fetch_count = 100  # Always use max page size for efficiency
-
-                while True:
-                    # For historical syncs, fetch without date filter (filter as we go)
-                    # For incremental syncs, use API's fromDate filter
-                    if incremental_sync:
-                        activities = api_client.get_activities(
-                            page=page,
-                            count=fetch_count,
-                            since=since_date,
-                            until=until_date,
-                            incremental=True,
-                        )
-                    else:
-                        # Fetch raw data for historical sync
-                        activities = api_client.get_activities(
-                            page=page,
-                            count=fetch_count,
-                        )
-
-                    if not activities:
-                        break
-
-                    # For historical syncs, filter and check if we can stop early
-                    # API returns newest first, so stop when we pass the target range
-                    if not incremental_sync:
-                        from datetime import datetime as dt
-                        found_in_range = False
-                        passed_range = False
-                        for activity in activities:
-                            start_str = activity.get("startDateTimeLocal", "")
-                            if start_str:
-                                try:
-                                    activity_date = dt.fromisoformat(start_str).date()
-                                    if since_date <= activity_date <= until_date:
-                                        all_activities.append(activity)
-                                        found_in_range = True
-                                    elif activity_date < since_date:
-                                        # We've passed the target range (activities are newest first)
-                                        passed_range = True
-                                except ValueError:
-                                    pass
-
-                        progress.update(
-                            fetch_task,
-                            description=f"Found {len(all_activities)} runs in {since_date.year}...",
-                        )
-
-                        # Stop if we've passed the target range
-                        if passed_range and found_in_range:
-                            break
-                        # Also stop if we found activities and this page had none in range
-                        if len(all_activities) > 0 and not found_in_range:
-                            break
-                    else:
-                        all_activities.extend(activities)
-                        progress.update(
-                            fetch_task,
-                            description=f"Fetched {len(all_activities)} runs...",
-                        )
-
-                    # For incremental: stop early if we've hit the limit
-                    if incremental_sync and limit and len(all_activities) >= limit:
-                        all_activities = all_activities[:limit]
-                        break
-
-                    page += 1
-                    # Small delay to avoid rate limiting (80 calls per 10 seconds)
-                    time.sleep(0.15)
-
-                if not all_activities:
-                    progress.update(fetch_task, description="No runs found", total=1, completed=1)
-                    console.print()
-                    display.display_info("No runs found in date range")
-                    return
-
-                # Apply limit if specified
-                if limit and limit > 0:
-                    all_activities = all_activities[:limit]
-                    progress.update(
-                        fetch_task,
-                        description=f"Found {len(all_activities)} runs (limited)",
-                        total=1,
-                        completed=1,
-                    )
-                else:
-                    progress.update(
-                        fetch_task,
-                        description=f"Found {len(all_activities)} runs",
-                        total=1,
-                        completed=1,
-                    )
-
-                if dry_run:
-                    console.print()
-                    display.display_info(f"Dry run - would sync {len(all_activities)} runs")
-                    return
-
-                # Store to Supabase
-                store_task = progress.add_task("Storing runs...", total=len(all_activities))
-
-                supabase = get_supabase_client()
-                runs_repo = RunsRepository(supabase)
-                users_repo = UsersRepository(supabase)
-
-                # Get source_id for this user
-                sources = users_repo.get_user_sources(user_id)
-                if not sources:
-                    display.display_error("No SmashRun source found for user")
-                    display.display_info("Try 'stk auth login' to re-register")
-                    raise typer.Exit(1) from None
-
-                source_id = UUID(sources[0]["id"])
-
-                for activity_data in all_activities:
-                    try:
-                        # Parse activity
-                        activity = api_client.parse_activity(activity_data)
-
-                        # Convert to run dict
-                        run_data = activity_to_run_dict(activity, user_id, source_id)
-
-                        # Upsert to Supabase
-                        runs_repo.upsert_run(user_id, source_id, run_data)
-
-                        runs_synced += 1
-
-                    except Exception as e:
-                        runs_failed += 1
-                        # Log but continue
-                        console.print(f"[dim]Failed: {activity_data.get('activityId')}: {e}[/dim]")
-
-                    progress.update(store_task, advance=1)
-
-                progress.update(
-                    store_task,
-                    description=f"Stored {runs_synced} runs",
-                )
-
-        except Exception as e:
-            display.display_error(f"Sync failed: {e}")
-            raise typer.Exit(1) from None
-
-    # Update sync state
-    if runs_synced > 0:
-        update_sync_state(until_date, runs_synced)
-
-    # Show results
-    console.print()
-    if runs_failed > 0:
-        display.display_warning(f"Synced {runs_synced} runs, {runs_failed} failed")
-    else:
-        display.display_sync_progress(f"Synced {runs_synced} runs as {username}", done=True)
-
-    if runs_synced == 0:
-        display.display_info("You're up to date!")
-    else:
-        display.display_info(f"Date range: {since_date} to {until_date}")
