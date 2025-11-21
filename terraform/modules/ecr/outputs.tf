@@ -32,6 +32,21 @@ output "query_repository_name" {
   value       = aws_ecr_repository.query.name
 }
 
+output "publish_status_repository_url" {
+  description = "URL of the publish status Lambda ECR repository"
+  value       = aws_ecr_repository.publish_status.repository_url
+}
+
+output "publish_status_repository_arn" {
+  description = "ARN of the publish status Lambda ECR repository"
+  value       = aws_ecr_repository.publish_status.arn
+}
+
+output "publish_status_repository_name" {
+  description = "Name of the publish status Lambda ECR repository"
+  value       = aws_ecr_repository.publish_status.name
+}
+
 output "registry_id" {
   description = "The registry ID where the repositories are created"
   value       = aws_ecr_repository.sync.registry_id

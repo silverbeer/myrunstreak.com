@@ -70,6 +70,20 @@ output "lambda_log_group_name" {
 }
 
 # ==============================================================================
+# Publish Status Lambda Outputs
+# ==============================================================================
+
+output "publish_status_function_name" {
+  description = "Name of the publish status Lambda function"
+  value       = module.lambda_publish_status.function_name
+}
+
+output "publish_status_function_arn" {
+  description = "ARN of the publish status Lambda function"
+  value       = module.lambda_publish_status.function_arn
+}
+
+# ==============================================================================
 # ECR Outputs
 # ==============================================================================
 
@@ -81,6 +95,11 @@ output "ecr_sync_repository_url" {
 output "ecr_query_repository_url" {
   description = "URL of the query Lambda ECR repository"
   value       = module.ecr.query_repository_url
+}
+
+output "ecr_publish_status_repository_url" {
+  description = "URL of the publish status Lambda ECR repository"
+  value       = module.ecr.publish_status_repository_url
 }
 
 # ==============================================================================

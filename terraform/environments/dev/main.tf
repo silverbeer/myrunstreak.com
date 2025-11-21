@@ -254,13 +254,68 @@ module "lambda_query" {
 
   # Environment variables for query handler
   # Note: Supabase credentials are fetched from Secrets Manager
-  extra_environment_variables = {}
+  extra_environment_variables = {
+    PUBLISH_STATUS_FUNCTION_NAME = "${local.project_name}-publish-status-${var.environment}"
+  }
 
   tags = local.common_tags
 
   depends_on = [
     module.iam,
     module.s3,
+    module.ecr
+  ]
+}
+
+# ==============================================================================
+# Module: Publish Status Lambda Function
+# ==============================================================================
+# Lambda that publishes run status to GCS for qualityplaybook.com
+
+module "lambda_publish_status" {
+  source = "../../modules/lambda"
+
+  function_name      = "${local.project_name}-publish-status-${var.environment}"
+  execution_role_arn = module.iam.lambda_execution_role_arn
+
+  # Container-based deployment
+  package_type = "Image"
+  image_uri    = "${module.ecr.publish_status_repository_url}:latest"
+
+  # Environment configuration
+  environment = var.environment
+  aws_region  = data.aws_region.current.name
+
+  # S3 configuration (not needed for this Lambda)
+  s3_bucket_name       = module.s3.bucket_id
+  smashrun_secret_name = null
+
+  # Performance tuning
+  memory_size            = 256  # MB
+  timeout                = 60   # 1 minute
+  ephemeral_storage_size = 512  # MB
+
+  # Logging
+  log_level          = var.lambda_log_level
+  log_retention_days = 7
+
+  # Monitoring
+  enable_xray_tracing = false
+  enable_alarms       = false
+
+  # Permissions
+  api_gateway_execution_arn = null
+  eventbridge_rule_arn      = null
+
+  # Environment variables
+  extra_environment_variables = {
+    GCS_BUCKET_NAME = "myrunstreak-public"
+  }
+
+  tags = local.common_tags
+
+  depends_on = [
+    module.iam,
     module.ecr
   ]
 }
@@ -372,6 +427,27 @@ resource "aws_lambda_permission" "query_api_gateway_invoke" {
 
   # Allow invocation from any path in this API Gateway
   source_arn = "${module.api_gateway.api_execution_arn}/*/*"
+}
+
+# ==============================================================================
+# IAM Policy for Lambda-to-Lambda Invocation
+# ==============================================================================
+# Allow query Lambda to invoke publish_status Lambda after sync
+
+resource "aws_iam_role_policy" "lambda_invoke_publish_status" {
+  name = "${local.project_name}-invoke-publish-status-${var.environment}"
+  role = module.iam.lambda_execution_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunction"
+        Resource = module.lambda_publish_status.function_arn
+      }
+    ]
+  })
 }
 
 # ==============================================================================
